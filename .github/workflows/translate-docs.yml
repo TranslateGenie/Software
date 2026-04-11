@@ -1,0 +1,76 @@
+# .github/workflows/translate-docs.yml
+#
+# Multilingual Document Automation — Translation Pipeline
+#
+# Triggers when files are pushed to docs-incoming/.
+# Downloads the new file, runs the Node.js translation script, commits the
+# translated outputs to translations/<lang>/, and moves the original to
+# docs-processed/.
+
+name: Translate Documents
+
+on:
+  push:
+    paths:
+      - 'docs-incoming/**'
+
+# Allow the workflow to write back translated files and move the originals.
+permissions:
+  contents: write
+
+jobs:
+  translate:
+    name: Run translation pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout repo ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch the full history so we can compare commits
+          fetch-depth: 2
+
+      # ── 2. Set up Node.js ─────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── 3. Install script dependencies ───────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Identify newly added files in docs-incoming/ ──────────────────
+      - name: Detect new incoming files
+        id: detect
+        run: |
+          # List files that were added or modified in this push
+          FILES=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'docs-incoming/' | grep -v '.gitkeep' || true)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Detected files: $FILES"
+
+      # ── 5. Run the translation script for each new file ──────────────────
+      - name: Translate documents
+        if: steps.detect.outputs.files != ''
+        env:
+          AZURE_TRANSLATOR_KEY: ${{ secrets.AZURE_TRANSLATOR_KEY }}
+          AZURE_TRANSLATOR_ENDPOINT: ${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
+          AZURE_TRANSLATOR_REGION: ${{ secrets.AZURE_TRANSLATOR_REGION }}
+          # Comma-separated list of target language codes
+          TARGET_LANGUAGES: ${{ vars.TARGET_LANGUAGES || 'en,zh' }}
+          INCOMING_FILES: ${{ steps.detect.outputs.files }}
+        run: node scripts/translate-docs.js
+
+      # ── 6. Commit translated outputs ─────────────────────────────────────
+      - name: Commit results
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add translations/ docs-processed/
+          # Only commit if there are staged changes
+          git diff --cached --quiet || git commit -m "chore: add translations [skip ci]"
+          git push
