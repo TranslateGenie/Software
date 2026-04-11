@@ -8,7 +8,6 @@ import React, { useState, useEffect } from 'react';
 const ALL_LANGUAGES = [
   { code: 'en', label: '🇬🇧 English' },
   { code: 'zh', label: '🇨🇳 Chinese (Simplified)' },
-  { code: 'third', label: '🌐 Third Language (configurable)' },
   { code: 'es', label: '🇪🇸 Spanish' },
   { code: 'fr', label: '🇫🇷 French' },
   { code: 'de', label: '🇩🇪 German' },
@@ -23,6 +22,7 @@ const DEFAULT_SETTINGS = {
   repoOwner: '',
   repoName: '',
   targetLanguages: ['en', 'zh'],
+  customLanguageCode: '',
 };
 
 export default function SettingsView({ onStatus }) {
@@ -135,6 +135,27 @@ export default function SettingsView({ onStatus }) {
               {label}
             </button>
           ))}
+        </div>
+        <div className="form-field" style={{ marginTop: 16 }}>
+          <label htmlFor="customLanguageCode">
+            Custom Language Code{' '}
+            <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+              (valid BCP-47 code, e.g. <code>ru</code>, <code>hi</code>, <code>tr</code>)
+            </span>
+          </label>
+          <input
+            id="customLanguageCode"
+            type="text"
+            value={form.customLanguageCode ?? ''}
+            onChange={(e) => handleChange('customLanguageCode', e.target.value.trim().toLowerCase())}
+            placeholder="e.g. ru"
+            maxLength={10}
+            style={{ maxWidth: 160 }}
+          />
+          <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+            Translated output will be saved in <code>translations/third/</code>. Leave blank to
+            disable the custom language slot.
+          </small>
         </div>
       </div>
 

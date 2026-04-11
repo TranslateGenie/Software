@@ -8,7 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 const LANG_LABELS = {
   en: '🇬🇧 English',
   zh: '🇨🇳 Chinese',
-  third: '🌐 Third Language',
+  third: '🌐 Custom Language',
 };
 
 const POLL_INTERVAL_MS = 30_000; // poll every 30 seconds

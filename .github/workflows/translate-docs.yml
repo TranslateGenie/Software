@@ -60,8 +60,10 @@ jobs:
           AZURE_TRANSLATOR_KEY: ${{ secrets.AZURE_TRANSLATOR_KEY }}
           AZURE_TRANSLATOR_ENDPOINT: ${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
           AZURE_TRANSLATOR_REGION: ${{ secrets.AZURE_TRANSLATOR_REGION }}
-          # Comma-separated list of target language codes
+          # Comma-separated list of valid BCP-47 language codes
           TARGET_LANGUAGES: ${{ vars.TARGET_LANGUAGES || 'en,zh' }}
+          # Optional: a custom BCP-47 code whose output will go to translations/third/
+          CUSTOM_LANGUAGE_CODE: ${{ vars.CUSTOM_LANGUAGE_CODE || '' }}
           INCOMING_FILES: ${{ steps.detect.outputs.files }}
         run: node scripts/translate-docs.js
 

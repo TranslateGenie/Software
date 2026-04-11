@@ -11,12 +11,13 @@
  *
  * Supported formats: DOCX, PPTX, XLSX, PDF
  *
- * Environment variables (set as GitHub Actions secrets / vars):
- *   AZURE_TRANSLATOR_KEY       — Azure Cognitive Services subscription key
- *   AZURE_TRANSLATOR_ENDPOINT  — e.g. https://api.cognitive.microsofttranslator.com
- *   AZURE_TRANSLATOR_REGION    — e.g. eastus
- *   TARGET_LANGUAGES           — comma-separated language codes, e.g. "en,zh,es"
- *   INCOMING_FILES             — newline-separated list of repo-relative file paths
+ * Environment variables:
+ *   AZURE_TRANSLATOR_KEY       — (GitHub Actions secret) Azure Cognitive Services subscription key
+ *   AZURE_TRANSLATOR_ENDPOINT  — (GitHub Actions secret) e.g. https://api.cognitive.microsofttranslator.com
+ *   AZURE_TRANSLATOR_REGION    — (GitHub Actions secret) e.g. eastus
+ *   TARGET_LANGUAGES           — (GitHub Actions variable) comma-separated BCP-47 language codes, e.g. "en,zh,es"
+ *   INCOMING_FILES             — (workflow-generated) newline-separated repo-relative paths of newly
+ *                                pushed files, computed by the workflow via `git diff`
  */
 
 import fs from 'fs/promises';
@@ -39,12 +40,25 @@ const {
   AZURE_TRANSLATOR_ENDPOINT = 'https://api.cognitive.microsofttranslator.com',
   AZURE_TRANSLATOR_REGION,
   TARGET_LANGUAGES = 'en,zh',
+  // CUSTOM_LANGUAGE_CODE: when set, output for this BCP-47 code goes to
+  // translations/third/ instead of translations/<code>/ to match the
+  // repository folder convention defined in the problem specification.
+  CUSTOM_LANGUAGE_CODE = '',
   INCOMING_FILES = '',
 } = process.env;
 
 const targetLanguages = TARGET_LANGUAGES.split(',')
   .map((l) => l.trim())
   .filter(Boolean);
+
+/**
+ * Map a BCP-47 language code to the output folder name under translations/.
+ * If CUSTOM_LANGUAGE_CODE is set and matches the code, use the "third" folder.
+ */
+function outputFolder(langCode) {
+  if (CUSTOM_LANGUAGE_CODE && langCode === CUSTOM_LANGUAGE_CODE) return 'third';
+  return langCode;
+}
 
 // ── Azure Translator helper ───────────────────────────────────────────────────
 
@@ -184,7 +198,7 @@ async function processDocx(inputPath, outputDir, fileName) {
     outZip.file('word/document.xml', updatedXml);
 
     const outBuffer = outZip.generate({ type: 'nodebuffer' });
-    const outPath = path.join(outputDir, lang, fileName);
+    const outPath = path.join(outputDir, outputFolder(lang), fileName);
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, outBuffer);
     console.log(`  [DOCX] Written: ${outPath}`);
@@ -264,7 +278,7 @@ async function processPptx(inputPath, outputDir, fileName) {
     }
 
     const outBuffer = outZip.generate({ type: 'nodebuffer' });
-    const outPath = path.join(outputDir, lang, fileName);
+    const outPath = path.join(outputDir, outputFolder(lang), fileName);
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, outBuffer);
     console.log(`  [PPTX] Written: ${outPath}`);
@@ -324,7 +338,7 @@ async function processXlsx(inputPath, outputDir, fileName) {
     outZip.file(sharedStringsKey, serializer.serializeToString(outDoc));
 
     const outBuffer = outZip.generate({ type: 'nodebuffer' });
-    const outPath = path.join(outputDir, lang, fileName);
+    const outPath = path.join(outputDir, outputFolder(lang), fileName);
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, outBuffer);
     console.log(`  [XLSX] Written: ${outPath}`);
@@ -363,7 +377,7 @@ async function processPdf(inputPath, outputDir, fileName) {
   const baseName = fileName.replace(/\.pdf$/i, '');
 
   for (const [lang, translatedParagraphs] of Object.entries(translations)) {
-    const outPath = path.join(outputDir, lang, `${baseName}.txt`);
+    const outPath = path.join(outputDir, outputFolder(lang), `${baseName}.txt`);
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, translatedParagraphs.join('\n\n'), 'utf8');
     console.log(`  [PDF]  Written: ${outPath}`);
@@ -398,11 +412,15 @@ async function main() {
 
   console.log(`Processing ${incomingFiles.length} file(s) into ${targetLanguages.join(', ')} …`);
 
-  // Ensure output directories exist
+  // Ensure output directories exist. For any language mapped to "third/" we
+  // create both the "third/" folder and any folder named after the code itself.
+  const uniqueOutputFolders = [
+    ...new Set(targetLanguages.map(outputFolder)),
+  ];
   await Promise.all([
     fs.mkdir(processedDir, { recursive: true }),
-    ...targetLanguages.map((lang) =>
-      fs.mkdir(path.join(translationsDir, lang), { recursive: true })
+    ...uniqueOutputFolders.map((folder) =>
+      fs.mkdir(path.join(translationsDir, folder), { recursive: true })
     ),
   ]);
 
