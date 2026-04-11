@@ -1,0 +1,17 @@
+{
+  "name": "mdas",
+  "version": "1.0.0",
+  "description": "Multilingual Document Automation System",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "npm run start --prefix electron",
+    "build": "npm run build --prefix electron",
+    "translate": "node scripts/translate-docs.js"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.8.10",
+    "pdf-parse": "^1.1.1",
+    "pizzip": "^3.1.4"
+  }
+}
