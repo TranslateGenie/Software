@@ -24,6 +24,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createReadStream } from 'fs';
 import { fileURLToPath } from 'url';
+import { Octokit } from '@octokit/rest';
+import { createAppAuth } from '@octokit/auth-app';
 
 // ── Dynamic imports for optional heavy dependencies ───────────────────────────
 // These packages must be installed via npm ci before this script runs.
@@ -36,28 +38,156 @@ const ROOT = path.resolve(__dirname, '..');
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 const {
-  AZURE_TRANSLATOR_KEY,
   AZURE_TRANSLATOR_ENDPOINT = 'https://api.cognitive.microsofttranslator.com',
-  AZURE_TRANSLATOR_REGION,
+  AZURE_TRANSLATOR_REGION = '',
   TARGET_LANGUAGES = 'en,zh',
-  // CUSTOM_LANGUAGE_CODE: when set, output for this BCP-47 code goes to
-  // translations/third/ instead of translations/<code>/ to match the
-  // repository folder convention defined in the problem specification.
-  CUSTOM_LANGUAGE_CODE = '',
   INCOMING_FILES = '',
+  GITHUB_APP_ID = '',
+  GITHUB_APP_INSTALLATION_ID = '',
+  GITHUB_APP_PRIVATE_KEY = '',
+  LICENSE_REPO_OWNER = '',
+  LICENSE_REPO_NAME = '',
+  LICENSES_PATH = 'licenses.json',
+  API_KEYS_PATH = 'apiks.json',
 } = process.env;
 
 const targetLanguages = TARGET_LANGUAGES.split(',')
   .map((l) => l.trim())
   .filter(Boolean);
 
-/**
- * Map a BCP-47 language code to the output folder name under translations/.
- * If CUSTOM_LANGUAGE_CODE is set and matches the code, use the "third" folder.
- */
 function outputFolder(langCode) {
-  if (CUSTOM_LANGUAGE_CODE && langCode === CUSTOM_LANGUAGE_CODE) return 'third';
   return langCode;
+}
+
+function getPrivateKey() {
+  if (!GITHUB_APP_PRIVATE_KEY) {
+    throw new Error('GITHUB_APP_PRIVATE_KEY is not set.');
+  }
+  return GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, '\n');
+}
+
+function ensureRepoConfig() {
+  if (!GITHUB_APP_ID || !GITHUB_APP_INSTALLATION_ID) {
+    throw new Error('GitHub App ID and installation ID are required.');
+  }
+  if (!LICENSE_REPO_OWNER || !LICENSE_REPO_NAME) {
+    throw new Error('LICENSE_REPO_OWNER and LICENSE_REPO_NAME are required.');
+  }
+}
+
+async function getOctokit() {
+  ensureRepoConfig();
+  return new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: GITHUB_APP_ID,
+      installationId: GITHUB_APP_INSTALLATION_ID,
+      privateKey: getPrivateKey(),
+    },
+  });
+}
+
+async function readRepoJson(repoPath) {
+  const octokit = await getOctokit();
+  const { data } = await octokit.repos.getContent({
+    owner: LICENSE_REPO_OWNER,
+    repo: LICENSE_REPO_NAME,
+    path: repoPath,
+  });
+
+  if (Array.isArray(data) || !data.content) {
+    throw new Error(`Expected file at ${repoPath}`);
+  }
+
+  return {
+    sha: data.sha,
+    json: JSON.parse(Buffer.from(data.content, data.encoding || 'base64').toString('utf8')),
+  };
+}
+
+async function writeRepoJson(repoPath, json, sha, message) {
+  const octokit = await getOctokit();
+  await octokit.repos.createOrUpdateFileContents({
+    owner: LICENSE_REPO_OWNER,
+    repo: LICENSE_REPO_NAME,
+    path: repoPath,
+    message,
+    sha,
+    content: Buffer.from(JSON.stringify(json, null, 2) + '\n', 'utf8').toString('base64'),
+  });
+}
+
+function parseApiKeysSchema(apiKeysJson) {
+  if (!Array.isArray(apiKeysJson)) {
+    throw new Error('apiks.json must be an array.');
+  }
+
+  const squareEntry = apiKeysJson.find((item) => item && Object.prototype.hasOwnProperty.call(item, 'Square'));
+  const azureEntry = apiKeysJson.find((item) => item && Object.prototype.hasOwnProperty.call(item, 'Azure'));
+
+  return {
+    square: Array.isArray(squareEntry?.Square) ? squareEntry.Square : [],
+    azure: Array.isArray(azureEntry?.Azure) ? azureEntry.Azure : [],
+  };
+}
+
+function resolveAzureConfig(azureEntries) {
+  const first = azureEntries[0];
+  if (typeof first === 'string') {
+    return {
+      key: first,
+      endpoint: AZURE_TRANSLATOR_ENDPOINT,
+      region: AZURE_TRANSLATOR_REGION,
+    };
+  }
+
+  if (first && typeof first === 'object') {
+    return {
+      key: first.key || first.apiKey || '',
+      endpoint: first.endpoint || AZURE_TRANSLATOR_ENDPOINT,
+      region: first.region || AZURE_TRANSLATOR_REGION,
+    };
+  }
+
+  return {
+    key: '',
+    endpoint: AZURE_TRANSLATOR_ENDPOINT,
+    region: AZURE_TRANSLATOR_REGION,
+  };
+}
+
+const runtimeAzure = {
+  key: '',
+  endpoint: AZURE_TRANSLATOR_ENDPOINT,
+  region: AZURE_TRANSLATOR_REGION,
+};
+
+const TIER_DEFAULTS = {
+  T1: { limit: 500, charLimit: 10000000 },
+  T2: { limit: 2000, charLimit: 40000000 },
+  T3: { limit: 10000, charLimit: 200000000 },
+};
+
+function normalizeLicense(license) {
+  const defaults = TIER_DEFAULTS[String(license?.type || '').toUpperCase()] || {};
+  license.requests = Number(license?.requests ?? 0);
+  license.limit = Number(license?.limit ?? defaults.limit ?? 0);
+  license.characters = Number(license?.characters ?? 0);
+  license.charLimit = Number(license?.charLimit ?? defaults.charLimit ?? 0);
+  return license;
+}
+
+function hasQuota(license) {
+  return license.requests < license.limit && license.characters < license.charLimit;
+}
+
+function consumeCharacters(license, charCount, fileName) {
+  if (charCount <= 0) return;
+  const projected = license.characters + charCount;
+  if (projected > license.charLimit) {
+    throw new Error(`Character limit would be exceeded for ${fileName}.`);
+  }
+  license.characters = projected;
 }
 
 // ── Azure Translator helper ───────────────────────────────────────────────────
@@ -72,11 +202,11 @@ function outputFolder(langCode) {
  * @returns {Promise<Record<string, string[]>>}
  */
 async function translateTexts(texts, fromLang = 'en') {
-  if (!AZURE_TRANSLATOR_KEY) {
-    throw new Error('AZURE_TRANSLATOR_KEY environment variable is not set.');
+  if (!runtimeAzure.key) {
+    throw new Error('No Azure key was found in apiks.json Azure array.');
   }
-  if (!AZURE_TRANSLATOR_REGION) {
-    throw new Error('AZURE_TRANSLATOR_REGION environment variable is not set.');
+  if (!runtimeAzure.region) {
+    throw new Error('No Azure region is configured for translation requests.');
   }
 
   // Filter out targets that match the source language
@@ -90,7 +220,7 @@ async function translateTexts(texts, fromLang = 'en') {
     return result;
   }
 
-  const url = new URL('/translate', AZURE_TRANSLATOR_ENDPOINT);
+  const url = new URL('/translate', runtimeAzure.endpoint);
   url.searchParams.set('api-version', '3.0');
   url.searchParams.set('from', fromLang);
   toLanguages.forEach((lang) => url.searchParams.append('to', lang));
@@ -113,8 +243,8 @@ async function translateTexts(texts, fromLang = 'en') {
     const response = await fetch(url.toString(), {
       method: 'POST',
       headers: {
-        'Ocp-Apim-Subscription-Key': AZURE_TRANSLATOR_KEY,
-        'Ocp-Apim-Subscription-Region': AZURE_TRANSLATOR_REGION,
+        'Ocp-Apim-Subscription-Key': runtimeAzure.key,
+        'Ocp-Apim-Subscription-Region': runtimeAzure.region,
         'Content-Type': 'application/json; charset=UTF-8',
       },
       body: JSON.stringify(body),
@@ -153,7 +283,7 @@ async function translateTexts(texts, fromLang = 'en') {
  *  5. Reinsert translated text
  *  6. Repack as a new .docx
  */
-async function processDocx(inputPath, outputDir, fileName) {
+async function processDocx(inputPath, outputDir, fileName, license) {
   const { default: PizZip } = await import('pizzip');
   const { DOMParser, XMLSerializer } = await import('@xmldom/xmldom');
 
@@ -179,6 +309,9 @@ async function processDocx(inputPath, outputDir, fileName) {
     console.log(`  [DOCX] No text nodes found in ${fileName} — skipping`);
     return;
   }
+
+  const charCount = texts.join('').length;
+  consumeCharacters(license, charCount, fileName);
 
   // Translate
   const translations = await translateTexts(texts);
@@ -215,7 +348,7 @@ async function processDocx(inputPath, outputDir, fileName) {
  *  4. Translate
  *  5. Reinsert & repack
  */
-async function processPptx(inputPath, outputDir, fileName) {
+async function processPptx(inputPath, outputDir, fileName, license) {
   const { default: PizZip } = await import('pizzip');
   const { DOMParser, XMLSerializer } = await import('@xmldom/xmldom');
 
@@ -253,6 +386,9 @@ async function processPptx(inputPath, outputDir, fileName) {
     console.log(`  [PPTX] No text runs found in ${fileName} — skipping`);
     return;
   }
+
+  const charCount = allTexts.reduce((sum, current) => sum + String(current.text || '').length, 0);
+  consumeCharacters(license, charCount, fileName);
 
   const translations = await translateTexts(allTexts.map((t) => t.text));
 
@@ -295,7 +431,7 @@ async function processPptx(inputPath, outputDir, fileName) {
  *  4. Translate
  *  5. Reinsert & repack
  */
-async function processXlsx(inputPath, outputDir, fileName) {
+async function processXlsx(inputPath, outputDir, fileName, license) {
   const { default: PizZip } = await import('pizzip');
   const { DOMParser, XMLSerializer } = await import('@xmldom/xmldom');
 
@@ -323,6 +459,9 @@ async function processXlsx(inputPath, outputDir, fileName) {
     console.log(`  [XLSX] No text entries in ${fileName} — skipping`);
     return;
   }
+
+  const charCount = texts.join('').length;
+  consumeCharacters(license, charCount, fileName);
 
   const translations = await translateTexts(texts);
 
@@ -354,7 +493,7 @@ async function processXlsx(inputPath, outputDir, fileName) {
  *  3. Save translated text as plain-text .txt files
  *     (PDF rebuilding requires a full rendering engine; text output is pragmatic)
  */
-async function processPdf(inputPath, outputDir, fileName) {
+async function processPdf(inputPath, outputDir, fileName, license) {
   const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
 
   const buffer = await fs.readFile(inputPath);
@@ -371,6 +510,9 @@ async function processPdf(inputPath, outputDir, fileName) {
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean);
+
+  const charCount = paragraphs.join('').length;
+  consumeCharacters(license, charCount, fileName);
 
   const translations = await translateTexts(paragraphs);
 
@@ -396,8 +538,8 @@ const PROCESSORS = {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const incomingDir = path.join(ROOT, 'docs-incoming');
-  const processedDir = path.join(ROOT, 'docs-processed');
+  const incomingDir = path.join(ROOT, 'incoming');
+  const processedDir = path.join(ROOT, 'processed');
   const translationsDir = path.join(ROOT, 'translations');
 
   // Determine which files to process
@@ -410,6 +552,18 @@ async function main() {
     return;
   }
 
+  const { json: apiKeys } = await readRepoJson(API_KEYS_PATH);
+  const parsedKeys = parseApiKeysSchema(apiKeys);
+  const azure = resolveAzureConfig(parsedKeys.azure);
+  runtimeAzure.key = azure.key;
+  runtimeAzure.endpoint = azure.endpoint;
+  runtimeAzure.region = azure.region;
+
+  const { json: licenses, sha: licensesSha } = await readRepoJson(LICENSES_PATH);
+  if (!Array.isArray(licenses)) {
+    throw new Error('licenses.json must be an array.');
+  }
+
   console.log(`Processing ${incomingFiles.length} file(s) into ${targetLanguages.join(', ')} …`);
 
   // Ensure output directories exist. For any language mapped to "third/" we
@@ -419,15 +573,39 @@ async function main() {
   ];
   await Promise.all([
     fs.mkdir(processedDir, { recursive: true }),
-    ...uniqueOutputFolders.map((folder) =>
-      fs.mkdir(path.join(translationsDir, folder), { recursive: true })
-    ),
   ]);
+
+  let usageUpdated = false;
 
   for (const repoRelativePath of incomingFiles) {
     const filePath = path.join(ROOT, repoRelativePath);
     const fileName = path.basename(filePath);
     const ext = path.extname(fileName).toLowerCase();
+
+    const match = repoRelativePath.match(/^incoming\/([^/]+)\//);
+    if (!match) {
+      console.warn(`  Invalid incoming path format: ${repoRelativePath}`);
+      continue;
+    }
+
+    const org = match[1];
+    const license = licenses.find((entry) => entry?.org === org && entry?.valid === true);
+    if (!license) {
+      console.warn(`  No valid license found for org ${org}. Skipping ${fileName}.`);
+      continue;
+    }
+
+    normalizeLicense(license);
+
+    if (!hasQuota(license)) {
+      license.valid = false;
+      usageUpdated = true;
+      console.warn(`  License quota reached for org ${org}. Skipping ${fileName}.`);
+      continue;
+    }
+
+    const orgTranslationsDir = path.join(translationsDir, org);
+    const orgProcessedDir = path.join(processedDir, org);
 
     console.log(`\nProcessing: ${fileName} (${ext})`);
 
@@ -438,16 +616,36 @@ async function main() {
     }
 
     try {
-      await processor(filePath, translationsDir, fileName);
+      await Promise.all([
+        fs.mkdir(orgProcessedDir, { recursive: true }),
+        ...uniqueOutputFolders.map((folder) => fs.mkdir(path.join(orgTranslationsDir, folder), { recursive: true })),
+      ]);
 
-      // Move original to docs-processed/
-      const destPath = path.join(processedDir, fileName);
+      await processor(filePath, orgTranslationsDir, fileName, license);
+
+      // Move original to processed/<org>/
+      const destPath = path.join(orgProcessedDir, fileName);
       await fs.rename(filePath, destPath);
       console.log(`  Moved original to: ${destPath}`);
+
+      license.requests = Number(license.requests || 0) + 1;
+      if (!hasQuota(license)) {
+        license.valid = false;
+      }
+      usageUpdated = true;
     } catch (err) {
       console.error(`  ERROR processing ${fileName}: ${err.message}`);
       // Continue with remaining files rather than aborting the whole job
     }
+  }
+
+  if (usageUpdated) {
+    const touchedOrgs = [...new Set(incomingFiles
+      .map((f) => (f.match(/^incoming\/([^/]+)\//) || [])[1])
+      .filter(Boolean))];
+    const orgTag = touchedOrgs.length > 0 ? touchedOrgs.join(',') : 'unknown-org';
+    await writeRepoJson(LICENSES_PATH, licenses, licensesSha, `chore: update usage for ${orgTag} [skip ci]`);
+    console.log('Updated license usage in licenses.json');
   }
 
   console.log('\nTranslation pipeline complete.');

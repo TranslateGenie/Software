@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "npm run start --prefix electron",
+    "backend": "npm run start --prefix backend",
+    "backend:dev": "npm run dev --prefix backend",
     "build": "npm run build --prefix electron",
     "translate": "node scripts/translate-docs.js"
   },

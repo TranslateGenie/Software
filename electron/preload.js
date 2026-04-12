@@ -6,13 +6,18 @@
  * so the React UI never needs direct access to Node.js APIs.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+const { contextBridge, ipcRenderer } = require('electron');
 
 /**
  * `window.mdas` — the only object exposed to the renderer.
  * All methods return Promises and route through IPC to main.js.
  */
 contextBridge.exposeInMainWorld('mdas', {
+  // ── Licensing ─────────────────────────────────────────────────────────────
+  validateLicenseKey: (licenseKey) => ipcRenderer.invoke('license:validateKey', licenseKey),
+  getLicenseSession: () => ipcRenderer.invoke('license:getSession'),
+  clearLicenseSession: () => ipcRenderer.invoke('license:clearSession'),
+
   // ── Settings ──────────────────────────────────────────────────────────────
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:set', settings),
@@ -27,4 +32,7 @@ contextBridge.exposeInMainWorld('mdas', {
   listTranslations: (lang) => ipcRenderer.invoke('github:listTranslations', lang),
   downloadFile: (payload) => ipcRenderer.invoke('github:downloadFile', payload),
   listIncoming: () => ipcRenderer.invoke('github:listIncoming'),
+
+  // ── Metadata ──────────────────────────────────────────────────────────────
+  getPublicConfig: () => ipcRenderer.invoke('app:getPublicConfig'),
 });

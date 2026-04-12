@@ -1,0 +1,15 @@
+{
+  "name": "mdas-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^7.1.2",
+    "@octokit/rest": "^20.1.1",
+    "express": "^4.21.2"
+  }
+}

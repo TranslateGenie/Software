@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register - MDAS</title>
+  <link rel="stylesheet" href="/site/styles.css" />
+</head>
+<body>
+  <main>
+    <div class="nav">
+      <img src="/site/Logo.png" alt="Translate Genie Logo" style="height: 80px; margin-right: -2rem; margin-top: -2rem;" />
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/register">Register</a>
+    </div>
+    <section class="card">
+      <h1>Register Organization</h1>
+      <form method="post" action="/api/register-org">
+        <label>Organization ID <input name="org" type="text" required /></label>
+        <label>Plan
+          <select name="type" required>
+            <option value="T1">Starter Pack: 100 requests or 2,000,000 characters</option>
+            <option value="T2">Small Org Pack: 500 requests or 10,000,000 characters</option>
+            <option value="T3">Medium Org Pack: 2,000 requests or 40,000,000 characters</option>
+            <option value="T4">Enterprise Pack: 10,000 requests or 200,000,000 characters</option>
+          </select>
+        </label>
+        <p>Quota is fixed by tier: T1=100 requests or 2,000,000 chars, T2=500 requests or 10,000,000 chars, T3=2,000 requests or 40,000,000 chars, T4=10,000 requests or 200,000,000 chars.</p>
+        <button class="btn" type="submit">Register</button>
+        <div>
+          <img src="/site/Logo.png" alt="Pricing Tiers" style="width: 50%; margin-top: 1rem; margin-left: 25%;" />
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

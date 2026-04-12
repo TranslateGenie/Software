@@ -2,17 +2,17 @@
 #
 # Multilingual Document Automation — Translation Pipeline
 #
-# Triggers when files are pushed to docs-incoming/.
+# Triggers when files are pushed to incoming/<org>/.
 # Downloads the new file, runs the Node.js translation script, commits the
-# translated outputs to translations/<lang>/, and moves the original to
-# docs-processed/.
+# translated outputs to translations/<org>/<lang>/, and moves the original to
+# processed/<org>/.
 
 name: Translate Documents
 
 on:
   push:
     paths:
-      - 'docs-incoming/**'
+      - 'incoming/**'
 
 # Allow the workflow to write back translated files and move the originals.
 permissions:
@@ -42,12 +42,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── 4. Identify newly added files in docs-incoming/ ──────────────────
+      # ── 4. Identify newly added files in incoming/ ───────────────────────
       - name: Detect new incoming files
         id: detect
         run: |
           # List files that were added or modified in this push
-          FILES=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'docs-incoming/' | grep -v '.gitkeep' || true)
+          FILES=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'incoming/' | grep -v '.gitkeep' || true)
           echo "files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -57,13 +57,17 @@ jobs:
       - name: Translate documents
         if: steps.detect.outputs.files != ''
         env:
-          AZURE_TRANSLATOR_KEY: ${{ secrets.AZURE_TRANSLATOR_KEY }}
-          AZURE_TRANSLATOR_ENDPOINT: ${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
-          AZURE_TRANSLATOR_REGION: ${{ secrets.AZURE_TRANSLATOR_REGION }}
+          GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_APP_INSTALLATION_ID: ${{ secrets.GITHUB_APP_INSTALLATION_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          LICENSE_REPO_OWNER: ${{ vars.LICENSE_REPO_OWNER }}
+          LICENSE_REPO_NAME: ${{ vars.LICENSE_REPO_NAME }}
+          LICENSES_PATH: licenses.json
+          API_KEYS_PATH: apiks.json
+          AZURE_TRANSLATOR_ENDPOINT: ${{ vars.AZURE_TRANSLATOR_ENDPOINT || 'https://api.cognitive.microsofttranslator.com' }}
+          AZURE_TRANSLATOR_REGION: ${{ vars.AZURE_TRANSLATOR_REGION || '' }}
           # Comma-separated list of valid BCP-47 language codes
           TARGET_LANGUAGES: ${{ vars.TARGET_LANGUAGES || 'en,zh' }}
-          # Optional: a custom BCP-47 code whose output will go to translations/third/
-          CUSTOM_LANGUAGE_CODE: ${{ vars.CUSTOM_LANGUAGE_CODE || '' }}
           INCOMING_FILES: ${{ steps.detect.outputs.files }}
         run: node scripts/translate-docs.js
 
@@ -72,7 +76,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add translations/ docs-processed/
+          git add translations/ processed/
           # Only commit if there are staged changes
           git diff --cached --quiet || git commit -m "chore: add translations [skip ci]"
           git push

@@ -1,0 +1,93 @@
+:root {
+  --bg: #f3efe7;
+  --ink: #17212b;
+  --muted: #526271;
+  --panel: #fffdf8;
+  --line: #d8d0c2;
+  --brand: #0b7a75;
+  --brand2: #e77f67;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 90% 10%, #9396ff 0%, transparent 30%),
+    radial-gradient(circle at 10% 0%, #6bebff 0%, transparent 25%), var(--bg);
+}
+
+main {
+  max-width: 900px;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.25rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+  position: fixed;
+  top: 3rem;
+  left: 10px;
+  right: 10px;
+  bottom: 2rem;
+  overflow: auto;
+}
+
+h1, h2 {
+  margin-top: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+p, li {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+a.btn, button.btn {
+  display: inline-block;
+  text-decoration: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(120deg, var(--brand), var(--brand2));
+  z-index: 10;
+}
+
+input, select {
+  width: 100%;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-top: 0.4rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.8rem;
+  font-weight: 600;
+}
+
+.nav {
+  display: flex;
+  justify-content: left;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  right: 1rem;
+}
+
+.btn:hover {
+  background: linear-gradient(120deg, var(--brand2), var(--brand));
+  cursor: pointer;
+}

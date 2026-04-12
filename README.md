@@ -1,195 +1,109 @@
-# MDAS — Multilingual Document Automation System
+# MDAS SaaS - Multilingual Document Automation System
 
-A complete system for drag-and-drop document translation powered by an **Electron desktop app**, **GitHub Actions**, and the **Azure AI Translator API**.
+MDAS is a SaaS translation product with a desktop client and developer-managed backend infrastructure.
 
----
+## Architecture
 
-## System Overview
+- Electron desktop app for end users
+- Developer-owned GitHub App for repository access
+- Developer-owned translation repository for file storage and automation
+- Developer-owned license repository for license records and API key storage
+- GitHub Actions for translation and cleanup workflows
+- Azure Translator used only in workflows
+- Backend licensing API for activation and plan enforcement
+- Installer website for registration and download
 
-```
-User (Electron App)
-  │  drag-and-drop DOCX / PPTX / XLSX / PDF
-  ▼
-docs-incoming/          ← Electron uploads files here via GitHub API
-  │
-  ▼ (GitHub Actions trigger)
-scripts/translate-docs.js
-  │  ├─ Extracts text from documents
-  │  ├─ Calls Azure AI Translator
-  │  └─ Rebuilds translated documents
-  ▼
-translations/
-  ├─ en/                ← English output
-  ├─ zh/                ← Chinese output
-  └─ third/             ← Third language output
-docs-processed/         ← Original files moved here after translation
-  │
-  ▼ (Electron polls for results)
-User downloads translated files
-```
+Users do not configure GitHub, Azure, or personal access tokens.
 
----
+## Repository Layout
 
-## Repository Structure
+- electron: Desktop app (main process, preload bridge, React renderer)
+- scripts/translate-docs.js: Translation pipeline logic
+- .github/workflows/translate-docs.yml: Translation automation
+- .github/workflows/cleanup.yml: Daily cleanup automation
+- backend: Licensing API and installer website
+- incoming, processed, translations: Storage structure used by automation
 
-```
-root/
-├─ electron/
-│  ├─ main.js               Electron main process (window + IPC + GitHub API)
-│  ├─ preload.js             Secure contextBridge API surface for renderer
-│  ├─ vite.config.js         Vite configuration for the React renderer
-│  ├─ package.json           Electron app dependencies
-│  └─ renderer/
-│     ├─ index.html
-│     ├─ index.jsx            React entry point
-│     ├─ App.jsx              Root component (navigation)
-│     ├─ styles.css           Global styles
-│     └─ components/
-│        ├─ DropZone.jsx      Drag-and-drop file input
-│        ├─ FileList.jsx      Queued file list with status indicators
-│        ├─ UploadView.jsx    Main upload screen
-│        ├─ TranslationsView.jsx  Browse & download translated files
-│        ├─ SettingsView.jsx  GitHub & language settings
-│        └─ StatusBar.jsx     Bottom status bar
-│
-├─ scripts/
-│  └─ translate-docs.js      GitHub Actions translation pipeline script
-│
-├─ docs-incoming/            Upload target (Electron → GitHub)
-├─ docs-processed/           Originals moved here post-translation
-├─ translations/
-│  ├─ en/
-│  ├─ zh/
-│  └─ third/
-│
-├─ .github/
-│  └─ workflows/
-│     └─ translate-docs.yml  Triggered on push to docs-incoming/**
-│
-├─ package.json              Root (script dependencies for translate-docs.js)
-└─ README.md
-```
+## Electron Client Flow
 
----
+1. First launch shows Enter License Key.
+2. App calls backend /api/validate-license.
+3. Backend returns valid, org, type, limit, requests, and token.
+4. App stores signed session token in OS keychain via keytar.
+5. App uploads files to incoming/<org> using GitHub App installation auth.
+6. App polls translations/<org>/<lang> and downloads completed files.
 
-## Getting Started
+## Environment Variables
 
-### 1. Clone the repository
+### Electron runtime
 
-```bash
-git clone https://github.com/<your-org>/<your-repo>.git
-cd <your-repo>
-```
+- LICENSE_API_BASE_URL
+- GITHUB_BACKEND_OWNER
+- GITHUB_BACKEND_REPO
+- GITHUB_APP_ID
+- GITHUB_APP_INSTALLATION_ID
+- GITHUB_APP_PRIVATE_KEY
 
-### 2. Configure GitHub Secrets
+Note: keep all secrets outside the repository (CI secrets, build secrets, or OS secret manager).
 
-In your GitHub repository go to **Settings → Secrets and variables → Actions** and add:
+### GitHub Actions translation workflow
 
-| Secret | Value |
-|--------|-------|
-| `AZURE_TRANSLATOR_KEY` | Your Azure Cognitive Services subscription key |
-| `AZURE_TRANSLATOR_ENDPOINT` | e.g. `https://api.cognitive.microsofttranslator.com` |
-| `AZURE_TRANSLATOR_REGION` | e.g. `eastus` |
+- GITHUB_APP_ID
+- GITHUB_APP_INSTALLATION_ID
+- GITHUB_APP_PRIVATE_KEY
+- LICENSE_REPO_OWNER
+- LICENSE_REPO_NAME
+- AZURE_TRANSLATOR_ENDPOINT
+- AZURE_TRANSLATOR_REGION
+- TARGET_LANGUAGES (optional)
 
-### 3. Set target languages (optional)
+License repo file schemas:
 
-In **Settings → Variables → Actions** add a repository variable:
+- licenses.json: array of { org, type, requests, limit, key, valid }
+- apiks.json: [ { "Square": [] }, { "Azure": [] } ]
 
-| Variable | Example |
-|----------|---------|
-| `TARGET_LANGUAGES` | `en,zh,es,fr` |
+## Backend API Endpoints
 
-### 4. Install and run the Electron app
+- POST /api/validate-license
+- POST /api/register-org
+- GET /api/download-installer
+- POST /api/square-webhook
 
-```bash
-cd electron
-npm install
-npm start
-```
+Website pages:
 
-On first run, go to the **Settings** tab and enter:
-- Your GitHub Personal Access Token (needs `repo` scope)
-- Repository owner and name
+- /
+- /pricing
+- /register
+- /license
+- /download
 
-### 5. Upload a document
+## Local Development
 
-1. Switch to the **Upload** tab
-2. Drag-and-drop or click to select DOCX/PPTX/XLSX/PDF files
-3. Click **Upload**
-4. GitHub Actions will automatically translate them
-5. Switch to the **Translations** tab and click **↻ Refresh** or wait for auto-poll
+### 1. Install dependencies
 
----
+- Root: npm install
+- Electron: cd electron && npm install
+- Backend: cd backend && npm install
 
-## Supported File Formats
+### 2. Run backend API
 
-| Format | Text Extraction | Rebuild |
-|--------|----------------|---------|
-| DOCX | `word/document.xml` — `<w:t>` nodes | Repacked ZIP |
-| PPTX | `ppt/slides/slideN.xml` — `<a:t>` runs | Repacked ZIP |
-| XLSX | `xl/sharedStrings.xml` — `<t>` elements | Repacked ZIP |
-| PDF | Full text extraction via `pdf-parse` | Plain-text `.txt` |
+- npm run backend:dev
 
----
+### 3. Run desktop app
 
-## Architecture Details
+- npm run dev --prefix electron
 
-### Electron App
+### 4. Build desktop app
 
-- **main.js** — Creates the `BrowserWindow`, exposes IPC handlers for settings, file I/O, and GitHub API calls using `@octokit/rest`. Secrets (GitHub token) are stored in the OS keychain via `electron-store`, never in the repository.
-- **preload.js** — Bridges the main process API to the renderer via `contextBridge` with `contextIsolation: true` and `nodeIntegration: false`.
-- **React renderer** — Built with Vite + React 18. Views: Upload, Translations, Settings.
+- npm run build --prefix electron
 
-### GitHub Actions
+## Security Rules
 
-- Triggers on `push` to `docs-incoming/**`
-- Detects newly added files with `git diff`
-- Runs `scripts/translate-docs.js` with Azure secrets injected as environment variables
-- Commits translated outputs and pushes back to the repository with `[skip ci]`
+- Never store license keys or signed tokens in plaintext files.
+- Never expose GitHub App private key in source control.
+- Never ask users for PATs or cloud credentials.
+- Keep Azure and GitHub secrets in developer-owned infrastructure only.
 
-### Translation Script
+## Notes
 
-- Uses the Azure Translator v3 REST API
-- Batches text in chunks of 50 strings to avoid request size limits
-- Processes each document format independently (DOCX/PPTX/XLSX/PDF)
-- Moves originals to `docs-processed/` after successful translation
-
----
-
-## Development
-
-```bash
-# Run Electron in development mode (hot-reload via Vite)
-cd electron
-npm install
-npm run dev
-
-# Install translation script dependencies
-npm install   # from repo root
-
-# Run translation script locally (requires Azure env vars)
-AZURE_TRANSLATOR_KEY=xxx \
-AZURE_TRANSLATOR_REGION=eastus \
-INCOMING_FILES="docs-incoming/test.docx" \
-node scripts/translate-docs.js
-```
-
----
-
-## Security Notes
-
-- GitHub tokens and Azure keys are **never stored in the repository**.
-- The Electron renderer runs with `contextIsolation: true` and `nodeIntegration: false`.
-- All sensitive settings are stored in the OS user data directory via `electron-store`.
-- The GitHub Actions workflow uses the minimum required permissions (`contents: write`).
-
----
-
-## Future / Roadmap
-
-- [ ] Subscription system with managed Azure API credits
-- [ ] OCR support for scanned PDFs
-- [ ] Full PDF rebuilding (preserving layout)
-- [ ] Support for additional file formats (ODT, RTF)
-- [ ] Per-document translation history
-- [ ] Progress notifications via GitHub webhook
+The backend and licensing logic in this repository are scaffold implementations for product integration. Production deployment should add hardened auth, persistent data storage, payment integration, audit logging, and key rotation.

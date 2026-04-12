@@ -23,10 +23,18 @@ async function readFileAsBase64(file) {
   });
 }
 
-export default function UploadView({ onStatus }) {
+export default function UploadView({ onStatus, licenseSession }) {
   const [files, setFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [alert, setAlert] = useState(null);
+
+  const limit = Number(licenseSession?.limit ?? 0);
+  const requests = Number(licenseSession?.requests ?? 0);
+  const charLimit = Number(licenseSession?.charLimit ?? 0);
+  const characters = Number(licenseSession?.characters ?? 0);
+  const remainingRequests = Math.max(0, limit - requests);
+  const remainingCharacters = Math.max(0, charLimit - characters);
+  const quotaReached = remainingRequests <= 0 || remainingCharacters <= 0;
 
   const handleFilesAdded = useCallback((newFiles) => {
     const entries = newFiles.map((file) => ({
@@ -48,6 +56,15 @@ export default function UploadView({ onStatus }) {
     setFiles((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
 
   const handleUploadAll = async () => {
+    if (quotaReached) {
+      setAlert({
+        type: 'error',
+        text: 'Your translation quota has been reached. Please purchase additional request packs.',
+      });
+      onStatus('Upload blocked: quota reached', 'error');
+      return;
+    }
+
     const pending = files.filter((e) => e.status === 'pending');
     if (pending.length === 0) return;
 
@@ -101,6 +118,14 @@ export default function UploadView({ onStatus }) {
       )}
 
       <div className="card">
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          Remaining Requests: <strong>{remainingRequests}</strong> | Remaining Characters: <strong>{remainingCharacters}</strong>
+        </p>
+        {quotaReached && (
+          <div className="alert alert--error" style={{ marginBottom: 12 }}>
+            Your translation quota has been reached. Please purchase additional request packs.
+          </div>
+        )}
         <p className="card__title">Drop Documents</p>
         <DropZone onFilesAdded={handleFilesAdded} />
       </div>
@@ -118,7 +143,7 @@ export default function UploadView({ onStatus }) {
               <button
                 className="btn btn--primary"
                 onClick={handleUploadAll}
-                disabled={isUploading || pendingCount === 0}
+                disabled={isUploading || pendingCount === 0 || quotaReached}
               >
                 {isUploading ? (
                   <><span className="spinner" /> Uploading…</>
@@ -136,7 +161,7 @@ export default function UploadView({ onStatus }) {
         <p className="card__title">How it works</p>
         <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <li>Drop your DOCX, PPTX, XLSX, or PDF documents above.</li>
-          <li>Click <strong>Upload</strong> — files go to <code>docs-incoming/</code> in your GitHub repo.</li>
+          <li>Click <strong>Upload</strong> — files are sent securely to the managed translation backend.</li>
           <li>GitHub Actions automatically translates them and stores results in <code>translations/</code>.</li>
           <li>Switch to <strong>Translations</strong> to download the results when they are ready.</li>
         </ol>

@@ -1,0 +1,30 @@
+name: Cleanup Translation Artifacts
+
+on:
+  schedule:
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Remove generated files but keep folders
+        run: |
+          find incoming -type f ! -name '.gitkeep' -delete
+          find processed -type f ! -name '.gitkeep' -delete
+          find translations -type f ! -name '.gitkeep' -delete
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add incoming processed translations
+          git diff --cached --quiet || git commit -m "chore: scheduled cleanup [skip ci]"
+          git push

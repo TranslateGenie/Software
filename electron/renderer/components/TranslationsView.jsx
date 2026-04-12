@@ -19,12 +19,6 @@ export default function TranslationsView({ onStatus }) {
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [alert, setAlert] = useState(null);
-  const [settings, setSettings] = useState(null);
-
-  // Load settings so we can use repoOwner / repoName for downloads
-  useEffect(() => {
-    window.mdas.getSettings().then(setSettings).catch(() => {});
-  }, []);
 
   const fetchTranslations = useCallback(async () => {
     setLoading(true);
@@ -54,12 +48,9 @@ export default function TranslationsView({ onStatus }) {
   }, [fetchTranslations]);
 
   const handleDownload = async (lang, file) => {
-    if (!settings) return;
     onStatus(`Downloading ${file.name}…`, 'warn');
     try {
       const { content, encoding } = await window.mdas.downloadFile({
-        repoOwner: settings.repoOwner,
-        repoName: settings.repoName,
         filePath: `translations/${lang}/${file.name}`,
       });
 

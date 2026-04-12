@@ -1,25 +1,30 @@
 {
   "name": "mdas-electron",
   "version": "1.0.0",
+  "type": "module",
   "description": "Multilingual Document Automation System — Electron App",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "concurrently \"vite\" \"electron .\"",
+    "dev": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "build": "vite build && electron-builder"
   },
   "dependencies": {
+    "@octokit/auth-app": "^7.1.2",
     "@octokit/rest": "^20.1.1",
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "keytar": "^7.9.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "electron": "^41.2.0",
     "electron-builder": "^24.13.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "vite": "^5.1.4"
+    "vite": "^5.1.4",
+    "wait-on": "^8.0.5"
   },
   "build": {
     "appId": "com.mdas.app",

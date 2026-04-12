@@ -1,6 +1,5 @@
 /**
- * SettingsView.jsx — Configure GitHub credentials, target languages,
- * and view subscription status.
+ * SettingsView.jsx — Admin diagnostics and managed backend visibility.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -18,15 +17,15 @@ const ALL_LANGUAGES = [
 ];
 
 const DEFAULT_SETTINGS = {
-  githubToken: '',
-  repoOwner: '',
-  repoName: '',
   targetLanguages: ['en', 'zh'],
   customLanguageCode: '',
+  license: null,
 };
 
-export default function SettingsView({ onStatus }) {
+export default function SettingsView({ onStatus, licenseSession }) {
   const [form, setForm] = useState(DEFAULT_SETTINGS);
+  const [license, setLicense] = useState(null);
+  const [appConfig, setAppConfig] = useState(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
@@ -36,6 +35,16 @@ export default function SettingsView({ onStatus }) {
       .getSettings()
       .then((s) => setForm({ ...DEFAULT_SETTINGS, ...s }))
       .catch(() => {});
+
+    window.mdas
+      .getLicenseSession()
+      .then((session) => setLicense(session ?? null))
+      .catch(() => setLicense(null));
+
+    window.mdas
+      .getPublicConfig()
+      .then(setAppConfig)
+      .catch(() => setAppConfig(null));
   }, []);
 
   const handleChange = (field, value) => {
@@ -65,6 +74,12 @@ export default function SettingsView({ onStatus }) {
     }
   };
 
+  const effectiveLicense = licenseSession?.valid ? licenseSession : license;
+  const reqUsed = Number(effectiveLicense?.requests ?? form.license?.requests ?? 0);
+  const reqLimit = Number(effectiveLicense?.limit ?? form.license?.limit ?? 0);
+  const charUsed = Number(effectiveLicense?.characters ?? form.license?.characters ?? 0);
+  const charLimit = Number(effectiveLicense?.charLimit ?? form.license?.charLimit ?? 0);
+
   return (
     <div>
       {saved && (
@@ -74,45 +89,16 @@ export default function SettingsView({ onStatus }) {
         <div className="alert alert--error">{error}</div>
       )}
 
-      {/* ── GitHub Credentials ─────────────────────────────────────── */}
       <div className="card">
-        <p className="card__title">GitHub Integration</p>
+        <p className="card__title">Managed Backend</p>
         <div className="settings-form">
           <div className="form-field">
-            <label htmlFor="githubToken">Personal Access Token</label>
-            <input
-              id="githubToken"
-              type="password"
-              value={form.githubToken}
-              onChange={(e) => handleChange('githubToken', e.target.value)}
-              placeholder="ghp_…"
-              autoComplete="off"
-            />
-            <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-              Requires <code>repo</code> scope. The token is stored locally and never committed.
-            </small>
+            <label>Repository</label>
+            <input type="text" readOnly value={appConfig?.backendRepo || 'Not configured'} />
           </div>
-
           <div className="form-field">
-            <label htmlFor="repoOwner">Repository Owner</label>
-            <input
-              id="repoOwner"
-              type="text"
-              value={form.repoOwner}
-              onChange={(e) => handleChange('repoOwner', e.target.value)}
-              placeholder="your-github-username-or-org"
-            />
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="repoName">Repository Name</label>
-            <input
-              id="repoName"
-              type="text"
-              value={form.repoName}
-              onChange={(e) => handleChange('repoName', e.target.value)}
-              placeholder="your-repo-name"
-            />
+            <label>License API</label>
+            <input type="text" readOnly value={appConfig?.licenseApiBaseUrl || 'Not configured'} />
           </div>
         </div>
       </div>
@@ -165,28 +151,25 @@ export default function SettingsView({ onStatus }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 28 }}>🔓</span>
           <div>
-            <p style={{ fontWeight: 600 }}>Free Plan</p>
+            <p style={{ fontWeight: 600 }}>{effectiveLicense?.org || form.license?.org || 'Unknown Org'} — {effectiveLicense?.type || form.license?.type || 'Unknown Type'}</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Unlimited translations via your own Azure API key. Pro plans with managed
-              API credits coming soon.
+              Requests: {reqUsed} / {reqLimit}
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Characters: {charUsed} / {charLimit}
             </p>
           </div>
         </div>
       </div>
 
-      {/* ── Azure credentials note ─────────────────────────────────── */}
       <div className="card">
-        <p className="card__title">Azure Translator Setup</p>
+        <p className="card__title">Security Model</p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-          The translation pipeline requires these GitHub Actions secrets in your repository:
+          End users do not provide GitHub tokens, repository settings, or Azure secrets. This desktop
+          app uses developer-managed infrastructure through GitHub App authentication.
         </p>
-        <ul style={{ paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <li><code>AZURE_TRANSLATOR_KEY</code> — your Azure Cognitive Services key</li>
-          <li><code>AZURE_TRANSLATOR_ENDPOINT</code> — e.g. <code>https://api.cognitive.microsofttranslator.com</code></li>
-          <li><code>AZURE_TRANSLATOR_REGION</code> — e.g. <code>eastus</code></li>
-        </ul>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-          Go to <em>Repository → Settings → Secrets and variables → Actions</em> to add them.
+        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          License sessions are stored in OS credential storage and periodically revalidated.
         </p>
       </div>
 
