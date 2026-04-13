@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('mdas', {
   // ── Licensing ─────────────────────────────────────────────────────────────
   validateLicenseKey: (licenseKey) => ipcRenderer.invoke('license:validateKey', licenseKey),
   getLicenseSession: () => ipcRenderer.invoke('license:getSession'),
+  refreshLicenseSession: () => ipcRenderer.invoke('license:refreshSession'),
   clearLicenseSession: () => ipcRenderer.invoke('license:clearSession'),
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -26,12 +27,26 @@ contextBridge.exposeInMainWorld('mdas', {
   saveFileDialog: (defaultName) => ipcRenderer.invoke('dialog:saveFile', defaultName),
   writeFile: (filePath, base64Data) => ipcRenderer.invoke('fs:writeFile', filePath, base64Data),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
+  openPricingPage: () => ipcRenderer.invoke('app:openPricingPage'),
 
   // ── GitHub ────────────────────────────────────────────────────────────────
   uploadFile: (payload) => ipcRenderer.invoke('github:uploadFile', payload),
   listTranslations: (lang) => ipcRenderer.invoke('github:listTranslations', lang),
   downloadFile: (payload) => ipcRenderer.invoke('github:downloadFile', payload),
   listIncoming: () => ipcRenderer.invoke('github:listIncoming'),
+
+  // ── Bug reports ───────────────────────────────────────────────────────────
+  listBugReports: (payload) => ipcRenderer.invoke('bugReports:list', payload),
+  getBugReport: (id) => ipcRenderer.invoke('bugReports:get', id),
+  createBugReport: (payload) => ipcRenderer.invoke('bugReports:create', payload),
+  addBugReportComment: (payload) => ipcRenderer.invoke('bugReports:addComment', payload),
+  updateBugReportStatus: (payload) => ipcRenderer.invoke('bugReports:updateStatus', payload),
+  updateBugReportDetails: (payload) => ipcRenderer.invoke('bugReports:updateDetails', payload),
+
+  // ── Admin mode ────────────────────────────────────────────────────────────
+  adminLogin: (password) => ipcRenderer.invoke('admin:login', password),
+  adminLogout: () => ipcRenderer.invoke('admin:logout'),
+  isAdminUnlocked: () => ipcRenderer.invoke('admin:isUnlocked'),
 
   // ── Metadata ──────────────────────────────────────────────────────────────
   getPublicConfig: () => ipcRenderer.invoke('app:getPublicConfig'),

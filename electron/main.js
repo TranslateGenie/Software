@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
+import { randomUUID } from 'crypto';
 import Store from 'electron-store';
 import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
@@ -41,6 +42,13 @@ const BACKEND_REPO_OWNER = process.env.GITHUB_BACKEND_OWNER || '';
 const BACKEND_REPO_NAME = process.env.GITHUB_BACKEND_REPO || '';
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID || '';
 const GITHUB_APP_INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID || '';
+const PRICING_PAGE_URL = process.env.PRICING_PAGE_URL || 'https://example.github.io/mdas/pricing.html';
+const BUG_REPORTS_REPO_OWNER = process.env.BUG_REPORTS_REPO_OWNER || BACKEND_REPO_OWNER;
+const BUG_REPORTS_REPO_NAME = process.env.BUG_REPORTS_REPO_NAME || BACKEND_REPO_NAME;
+const BUG_REPORTS_PATH = String(process.env.BUG_REPORTS_PATH || 'bug-reports').replace(/^\/+|\/+$/g, '');
+const ADMIN_PASSWORD = process.env.MDAS_ADMIN_PASSWORD || '';
+
+let adminUnlocked = false;
 
 function getAppPrivateKey() {
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY || '';
@@ -104,6 +112,185 @@ async function validateWithBackend(payload, token) {
   }
 
   return response.json();
+}
+
+async function refreshLicenseSession({ allowStale = true } = {}) {
+  const session = await readLicenseSession();
+  if (!session?.token) {
+    return { valid: false };
+  }
+
+  try {
+    const result = await validateWithBackend({}, session.token);
+    if (!result.valid) {
+      await clearLicenseSession();
+      store.set('license', {
+        org: null,
+        type: null,
+        limit: 0,
+        requests: 0,
+        charLimit: 0,
+        characters: 0,
+        valid: false,
+      });
+      return { valid: false, reason: result.reason || 'invalid' };
+    }
+
+    const refreshed = {
+      token: result.token || session.token,
+      org: result.org ?? session.org,
+      type: result.type ?? session.type,
+      limit: Number(result.limit ?? session.limit ?? 0),
+      requests: Number(result.requests ?? session.requests ?? 0),
+      charLimit: Number(result.charLimit ?? session.charLimit ?? 0),
+      characters: Number(result.characters ?? session.characters ?? 0),
+      expiresAt: Number(result.expires_at ?? session.expiresAt ?? 0),
+      validatedAt: Date.now(),
+    };
+
+    await saveLicenseSession(refreshed);
+    store.set('license', {
+      org: refreshed.org,
+      type: refreshed.type,
+      limit: refreshed.limit,
+      requests: refreshed.requests,
+      charLimit: refreshed.charLimit,
+      characters: refreshed.characters,
+      valid: true,
+    });
+
+    return { valid: true, ...refreshed };
+  } catch {
+    if (!allowStale) {
+      throw new Error('Unable to refresh license session.');
+    }
+    return { valid: true, ...session, stale: true };
+  }
+}
+
+function getBugReportsRepoConfig() {
+  if (!BUG_REPORTS_REPO_OWNER || !BUG_REPORTS_REPO_NAME) {
+    throw new Error('Bug reports repository settings are incomplete. Set BUG_REPORTS_REPO_OWNER and BUG_REPORTS_REPO_NAME.');
+  }
+  return {
+    owner: BUG_REPORTS_REPO_OWNER,
+    repo: BUG_REPORTS_REPO_NAME,
+  };
+}
+
+function isNotFoundError(error) {
+  return Number(error?.status) === 404;
+}
+
+async function getRepoJsonFile({ owner, repo, path: filePath }) {
+  const octokit = await getInstallationOctokit();
+  const { data } = await octokit.repos.getContent({
+    owner,
+    repo,
+    path: filePath,
+  });
+
+  if (Array.isArray(data) || !data.content) {
+    throw new Error(`Expected JSON file at ${filePath}`);
+  }
+
+  const decoded = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+  return {
+    json: JSON.parse(decoded),
+    sha: data.sha,
+    path: data.path,
+  };
+}
+
+async function writeRepoJsonFile({ owner, repo, path: filePath, json, sha, message }) {
+  const octokit = await getInstallationOctokit();
+  await octokit.repos.createOrUpdateFileContents({
+    owner,
+    repo,
+    path: filePath,
+    message,
+    content: Buffer.from(JSON.stringify(json, null, 2) + '\n', 'utf8').toString('base64'),
+    ...(sha ? { sha } : {}),
+  });
+}
+
+function normalizeBugReport(report, filePath) {
+  return {
+    id: String(report?.id || filePath?.split('/').pop()?.replace(/\.json$/i, '') || randomUUID()),
+    title: String(report?.title || 'Untitled report'),
+    description: String(report?.description || ''),
+    createdBy: String(report?.createdBy || 'anonymous'),
+    createdAt: String(report?.createdAt || new Date().toISOString()),
+    status: String(report?.status || 'open'),
+    comments: Array.isArray(report?.comments)
+      ? report.comments.map((item) => ({
+          author: String(item?.author || 'user'),
+          message: String(item?.message || ''),
+          timestamp: String(item?.timestamp || new Date().toISOString()),
+        }))
+      : [],
+  };
+}
+
+async function listBugReportsRaw() {
+  const { owner, repo } = getBugReportsRepoConfig();
+  const octokit = await getInstallationOctokit();
+
+  let entries = [];
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: BUG_REPORTS_PATH,
+    });
+    entries = Array.isArray(data)
+      ? data.filter((item) => item.type === 'file' && item.name.endsWith('.json'))
+      : [];
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const reports = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const { json } = await getRepoJsonFile({ owner, repo, path: entry.path });
+        return normalizeBugReport(json, entry.path);
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  return reports.filter(Boolean).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function nextBugReportId(existingIds) {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  const datePrefix = `${year}-${month}-${day}`;
+
+  const used = new Set(
+    existingIds
+      .map((id) => String(id || ''))
+      .filter((id) => id.startsWith(`${datePrefix}-`))
+      .map((id) => Number(id.slice(-3)))
+      .filter((value) => Number.isFinite(value))
+  );
+
+  let seq = 1;
+  while (used.has(seq)) seq += 1;
+  return `${datePrefix}-${String(seq).padStart(3, '0')}`;
+}
+
+function assertAdmin() {
+  if (!adminUnlocked) {
+    throw new Error('Admin mode is required for this action.');
+  }
 }
 
 let mainWindow;
@@ -214,6 +401,7 @@ ipcMain.handle('license:validateKey', async (_event, licenseKey) => {
     requests: Number(result.requests || 0),
     charLimit: Number(result.charLimit || 0),
     characters: Number(result.characters || 0),
+    expiresAt: Number(result.expires_at || 0),
     validatedAt: Date.now(),
   };
 
@@ -232,44 +420,11 @@ ipcMain.handle('license:validateKey', async (_event, licenseKey) => {
 });
 
 ipcMain.handle('license:getSession', async () => {
-  const session = await readLicenseSession();
-  if (!session?.token) {
-    return { valid: false };
-  }
+  return refreshLicenseSession({ allowStale: true });
+});
 
-  try {
-    const result = await validateWithBackend({}, session.token);
-    if (!result.valid) {
-      await clearLicenseSession();
-      return { valid: false, reason: result.reason || 'invalid' };
-    }
-
-    const refreshed = {
-      token: result.token || session.token,
-      org: result.org ?? session.org,
-      type: result.type ?? session.type,
-      limit: Number(result.limit ?? session.limit ?? 0),
-      requests: Number(result.requests ?? session.requests ?? 0),
-      charLimit: Number(result.charLimit ?? session.charLimit ?? 0),
-      characters: Number(result.characters ?? session.characters ?? 0),
-      validatedAt: Date.now(),
-    };
-
-    await saveLicenseSession(refreshed);
-    store.set('license', {
-      org: refreshed.org,
-      type: refreshed.type,
-      limit: refreshed.limit,
-      requests: refreshed.requests,
-      charLimit: refreshed.charLimit,
-      characters: refreshed.characters,
-      valid: true,
-    });
-
-    return { valid: true, ...refreshed };
-  } catch {
-    return { valid: true, ...session, stale: true };
-  }
+ipcMain.handle('license:refreshSession', async () => {
+  return refreshLicenseSession({ allowStale: true });
 });
 
 ipcMain.handle('license:clearSession', async () => {
@@ -299,6 +454,26 @@ ipcMain.handle('shell:openPath', async (_event, filePath) => {
   await shell.openPath(filePath);
   return { ok: true };
 });
+
+ipcMain.handle('app:openPricingPage', async () => {
+  await shell.openExternal(PRICING_PAGE_URL);
+  return { ok: true, url: PRICING_PAGE_URL };
+});
+
+ipcMain.handle('admin:login', async (_event, password) => {
+  if (!ADMIN_PASSWORD) {
+    return { ok: false, error: 'MDAS_ADMIN_PASSWORD is not configured.' };
+  }
+  adminUnlocked = password === ADMIN_PASSWORD;
+  return { ok: adminUnlocked };
+});
+
+ipcMain.handle('admin:logout', async () => {
+  adminUnlocked = false;
+  return { ok: true };
+});
+
+ipcMain.handle('admin:isUnlocked', async () => ({ ok: true, unlocked: adminUnlocked }));
 
 // ─── GitHub IPC ────────────────────────────────────────────────────────────────
 
@@ -427,7 +602,160 @@ ipcMain.handle('github:listIncoming', async () => {
   }
 });
 
+ipcMain.handle('bugReports:list', async (_event, { page = 1, pageSize = 10 } = {}) => {
+  const reports = await listBugReportsRaw();
+  const total = reports.length;
+  const safePageSize = Math.max(1, Number(pageSize) || 10);
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const start = (safePage - 1) * safePageSize;
+  const items = reports.slice(start, start + safePageSize).map((report) => ({
+    id: report.id,
+    title: report.title,
+    createdAt: report.createdAt,
+    status: report.status,
+    createdBy: report.createdBy,
+    commentCount: report.comments.length,
+  }));
+
+  return {
+    items,
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages,
+  };
+});
+
+ipcMain.handle('bugReports:get', async (_event, id) => {
+  const reports = await listBugReportsRaw();
+  const report = reports.find((item) => item.id === id);
+  if (!report) {
+    throw new Error('Bug report not found.');
+  }
+  return report;
+});
+
+ipcMain.handle('bugReports:create', async (_event, payload) => {
+  const reports = await listBugReportsRaw();
+  const nextId = nextBugReportId(reports.map((item) => item.id));
+  const { owner, repo } = getBugReportsRepoConfig();
+  const createdAt = new Date().toISOString();
+  const report = normalizeBugReport({
+    id: nextId,
+    title: String(payload?.title || '').trim(),
+    description: String(payload?.description || '').trim(),
+    createdBy: String(payload?.createdBy || 'anonymous').trim() || 'anonymous',
+    createdAt,
+    status: 'open',
+    comments: [],
+  });
+
+  if (!report.title || !report.description) {
+    throw new Error('Title and description are required.');
+  }
+
+  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${report.id}.json`);
+  await writeRepoJsonFile({
+    owner,
+    repo,
+    path: reportPath,
+    json: report,
+    message: `chore: add bug report ${report.id} [skip ci]`,
+  });
+
+  return report;
+});
+
+ipcMain.handle('bugReports:addComment', async (_event, payload) => {
+  assertAdmin();
+  const { owner, repo } = getBugReportsRepoConfig();
+  const id = String(payload?.id || '');
+  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
+  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
+  const report = normalizeBugReport(json, reportPath);
+  const message = String(payload?.message || '').trim();
+  if (!message) {
+    throw new Error('Comment message is required.');
+  }
+
+  report.comments.push({
+    author: 'admin',
+    message,
+    timestamp: new Date().toISOString(),
+  });
+
+  await writeRepoJsonFile({
+    owner,
+    repo,
+    path: reportPath,
+    json: report,
+    sha,
+    message: `chore: comment on bug report ${report.id} [skip ci]`,
+  });
+
+  return report;
+});
+
+ipcMain.handle('bugReports:updateStatus', async (_event, payload) => {
+  assertAdmin();
+  const allowedStatuses = new Set(['open', 'in progress', 'resolved']);
+  const nextStatus = String(payload?.status || '').toLowerCase();
+  if (!allowedStatuses.has(nextStatus)) {
+    throw new Error('Status must be one of: open, in progress, resolved.');
+  }
+
+  const { owner, repo } = getBugReportsRepoConfig();
+  const id = String(payload?.id || '');
+  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
+  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
+  const report = normalizeBugReport(json, reportPath);
+  report.status = nextStatus;
+
+  await writeRepoJsonFile({
+    owner,
+    repo,
+    path: reportPath,
+    json: report,
+    sha,
+    message: `chore: update bug report ${report.id} status [skip ci]`,
+  });
+
+  return report;
+});
+
+ipcMain.handle('bugReports:updateDetails', async (_event, payload) => {
+  assertAdmin();
+  const { owner, repo } = getBugReportsRepoConfig();
+  const id = String(payload?.id || '');
+  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
+  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
+  const report = normalizeBugReport(json, reportPath);
+
+  const nextTitle = String(payload?.title || '').trim();
+  const nextDescription = String(payload?.description || '').trim();
+  if (!nextTitle || !nextDescription) {
+    throw new Error('Title and description are required.');
+  }
+
+  report.title = nextTitle;
+  report.description = nextDescription;
+
+  await writeRepoJsonFile({
+    owner,
+    repo,
+    path: reportPath,
+    json: report,
+    sha,
+    message: `chore: edit bug report ${report.id} [skip ci]`,
+  });
+
+  return report;
+});
+
 ipcMain.handle('app:getPublicConfig', async () => ({
   licenseApiBaseUrl: LICENSE_API_BASE_URL,
   backendRepo: `${BACKEND_REPO_OWNER}/${BACKEND_REPO_NAME}`,
+  pricingPageUrl: PRICING_PAGE_URL,
+  bugReportsPath: BUG_REPORTS_PATH,
 }));

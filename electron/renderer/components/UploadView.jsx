@@ -23,7 +23,7 @@ async function readFileAsBase64(file) {
   });
 }
 
-export default function UploadView({ onStatus, licenseSession }) {
+export default function UploadView({ onStatus, licenseSession, onLicenseSessionUpdated }) {
   const [files, setFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -56,13 +56,49 @@ export default function UploadView({ onStatus, licenseSession }) {
     setFiles((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
 
   const handleUploadAll = async () => {
-    if (quotaReached) {
+    let effectiveSession = licenseSession;
+    try {
+      const refreshed = await window.mdas.refreshLicenseSession();
+      if (onLicenseSessionUpdated) {
+        onLicenseSessionUpdated(refreshed);
+      }
+      effectiveSession = refreshed;
+    } catch {
+      // Ignore refresh errors here; existing session values are used as fallback.
+    }
+
+    if (!effectiveSession?.valid) {
+      setAlert({
+        type: 'error',
+        text: 'License is missing or invalid. Activate or renew your license before uploading.',
+      });
+      onStatus('Upload blocked: invalid license', 'error');
+      return;
+    }
+
+    const refreshedLimit = Number(effectiveSession?.limit ?? 0);
+    const refreshedRequests = Number(effectiveSession?.requests ?? 0);
+    const refreshedCharLimit = Number(effectiveSession?.charLimit ?? 0);
+    const refreshedCharacters = Number(effectiveSession?.characters ?? 0);
+    const refreshedRemainingRequests = Math.max(0, refreshedLimit - refreshedRequests);
+    const refreshedRemainingCharacters = Math.max(0, refreshedCharLimit - refreshedCharacters);
+    const refreshedQuotaReached = refreshedRemainingRequests <= 0 || refreshedRemainingCharacters <= 0;
+
+    if (refreshedQuotaReached || quotaReached) {
       setAlert({
         type: 'error',
         text: 'Your translation quota has been reached. Please purchase additional request packs.',
       });
       onStatus('Upload blocked: quota reached', 'error');
       return;
+    }
+
+    if ((refreshedLimit > 0 && refreshedRemainingRequests / refreshedLimit < 0.1) || (refreshedCharLimit > 0 && refreshedRemainingCharacters / refreshedCharLimit < 0.1)) {
+      setAlert({
+        type: 'warn',
+        text: 'Your license is nearing its limits. Renew soon to avoid interruptions.',
+      });
+      onStatus('License nearing limits', 'warn');
     }
 
     const pending = files.filter((e) => e.status === 'pending');

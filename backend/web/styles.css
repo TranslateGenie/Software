@@ -27,7 +27,7 @@ main {
 }
 
 .card {
-  background: var(--panel);
+  background: radial-gradient(circle at 90% 90%, #9396ff 0%, transparent 30%), radial-gradient(circle at 10% 90%, #6bebff 0%, transparent 25%), var(--bg);
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 1.25rem;
