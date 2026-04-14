@@ -41,23 +41,37 @@ export async function getOctokit() {
   });
 }
 
-async function getJsonFile(path) {
-  const octokit = await getOctokit();
-  const { data } = await octokit.repos.getContent({
-    owner: LICENSE_REPO_OWNER,
-    repo: LICENSE_REPO_NAME,
-    path,
-  });
-
-  if (Array.isArray(data) || !data.content) {
-    throw new Error(`Expected file content at ${path}`);
+function normalizeGitHubError(error) {
+  const message = String(error?.message || '');
+  if (message.includes('create-an-installation-access-token-for-an-app')) {
+    return new Error(
+      'GitHub App installation token request failed (404). Check GITHUB_APP_INSTALLATION_ID, ensure the app is installed on LICENSE_REPO_OWNER/LICENSE_REPO_NAME, and verify the private key belongs to that same app.'
+    );
   }
+  return error;
+}
 
-  const decoded = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
-  return {
-    json: JSON.parse(decoded),
-    sha: data.sha,
-  };
+async function getJsonFile(path) {
+  try {
+    const octokit = await getOctokit();
+    const { data } = await octokit.repos.getContent({
+      owner: LICENSE_REPO_OWNER,
+      repo: LICENSE_REPO_NAME,
+      path,
+    });
+
+    if (Array.isArray(data) || !data.content) {
+      throw new Error(`Expected file content at ${path}`);
+    }
+
+    const decoded = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+    return {
+      json: JSON.parse(decoded),
+      sha: data.sha,
+    };
+  } catch (error) {
+    throw normalizeGitHubError(error);
+  }
 }
 
 function normalizeLicensesPayload(payload) {

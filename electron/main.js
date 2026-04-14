@@ -15,9 +15,14 @@ import Store from 'electron-store';
 import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
 import keytar from 'keytar';
+import { config as loadDotenv } from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load .env for local development. Silently ignored when the file is absent
+// (packaged builds never ship .env).
+loadDotenv({ path: path.join(__dirname, '.env') });
 
 // Persistent settings store (stored in user data dir, never in repo)
 const store = new Store({
