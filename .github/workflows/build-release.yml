@@ -13,15 +13,18 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: 'npm'
@@ -65,23 +68,61 @@ jobs:
         # shell: pwsh
         run: echo "Code signing not configured yet. To enable, set WINDOWS_CERT_B64 and WINDOWS_CERT_PASSWORD secrets."
 
-      - name: Create Release
-        uses: actions/create-release@v1
-        id: create_release
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          $tag = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            if ("${{ github.ref_type }}" -eq "tag") {
+              $tag = "${{ github.ref_name }}"
+            } else {
+              $tag = "v${{ github.run_number }}"
+            }
+          }
+
+          if (-not $tag.StartsWith("v")) {
+            $tag = "v$tag"
+          }
+
+          $isPrerelease = if ("${{ github.ref_type }}" -eq "tag") { "false" } else { "true" }
+
+          "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_name=Release $tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "prerelease=$isPrerelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_url=https://github.com/${{ github.repository }}/releases/download/$tag/mdas-installer.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Create or update release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name || format('v{0}', github.run_number) }}
-          release_name: Release ${{ github.ref_name || format('v{0}', github.run_number) }}
-          draft: false
-          prerelease: ${{ github.ref_type != 'tag' }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag_name }}"
+          $name = "${{ steps.meta.outputs.release_name }}"
+
+          gh release view "$tag" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            if ("${{ steps.meta.outputs.prerelease }}" -eq "true") {
+              gh release create "$tag" --title "$name" --notes "Automated pre-release build." --prerelease
+            } else {
+              gh release create "$tag" --title "$name" --notes "Automated release build."
+            }
+          } else {
+            if ("${{ steps.meta.outputs.prerelease }}" -eq "true") {
+              gh release edit "$tag" --title "$name" --prerelease
+            } else {
+              gh release edit "$tag" --title "$name"
+            }
+          }
+        shell: pwsh
 
       - name: Find and upload installer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find the built installer
-          $installers = Get-ChildItem -Path "electron/dist" -Filter "*.exe" -Recurse
+          # Find the built installer while excluding unpacked app binaries.
+          $installers = Get-ChildItem -Path "electron/dist" -Filter "*.exe" -Recurse -File |
+            Where-Object { $_.FullName -notmatch 'win-unpacked' } |
+            Sort-Object Length -Descending
           if ($installers.Count -eq 0) {
             Write-Error "No .exe files found in electron/dist"
             exit 1
@@ -90,32 +131,13 @@ jobs:
           $installer = $installers[0]
           Write-Output "Uploading installer: $($installer.FullName)"
           
-          # Upload via GitHub CLI
-          gh release upload "${{ steps.create_release.outputs.tag_name }}" "$($installer.FullName)" --clobber
+          # Upload with a stable filename so download URLs stay consistent.
+          gh release upload "${{ steps.meta.outputs.tag_name }}" "$($installer.FullName)#mdas-installer.exe" --clobber
         shell: pwsh
 
       - name: Output installer URL
         run: |
-          $tag = "${{ github.ref_name }}" -replace '^refs/tags/', ''
-          if (-not $tag -or $tag -eq 'HEAD') {
-            $tag = "v${{ github.run_number }}"
-          }
-          $installer_url = "https://github.com/${{ github.repository }}/releases/download/$tag/mdas-installer.exe"
+          $installer_url = "${{ steps.meta.outputs.installer_url }}"
           Write-Output "INSTALLER_URL=$installer_url" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output "Installer URL: $installer_url"
         shell: pwsh
-
-  update-env:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref_type == 'tag'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Update download handler environment
-        run: |
-          # This step documents where INSTALLER_URL should be set
-          # In production, you would store this in your deployment environment
-          echo "The installer is now available at: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mdas-installer.exe"
-          echo "Set INSTALLER_URL environment variable or update your deployment to use this URL."
