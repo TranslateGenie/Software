@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "backend/web/**"
-      - ".github/workflows/deploy-pages.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
