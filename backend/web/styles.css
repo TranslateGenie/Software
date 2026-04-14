@@ -20,6 +20,20 @@ body {
     radial-gradient(circle at 10% 0%, #6bebff 0%, transparent 25%), var(--bg);
 }
 
+body.page-preload main {
+  opacity: 0;
+}
+
+body.page-ready main {
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+body.page-leave main {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
 main {
   max-width: 900px;
   margin: 3rem auto;
