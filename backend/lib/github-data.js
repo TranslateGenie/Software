@@ -48,6 +48,11 @@ function normalizeGitHubError(error) {
       'GitHub App installation token request failed (404). Check GITHUB_APP_INSTALLATION_ID, ensure the app is installed on LICENSE_REPO_OWNER/LICENSE_REPO_NAME, and verify the private key belongs to that same app.'
     );
   }
+  if (message.includes('Resource not accessible by integration')) {
+    return new Error(
+      'GitHub App can authenticate but lacks repository access/permissions. Install the app on LICENSE_REPO_OWNER/LICENSE_REPO_NAME and grant Repository permissions: Contents (Read and write), Metadata (Read-only). Then re-install or update app permissions for the installation.'
+    );
+  }
   return error;
 }
 
