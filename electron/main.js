@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
+import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import Store from 'electron-store';
 import { Octokit } from '@octokit/rest';
@@ -36,8 +37,11 @@ const store = new Store({
 
 const KEYTAR_SERVICE = 'mdas';
 const KEYTAR_ACCOUNT = 'license-session';
+const KEYTAR_LICENSE_KEY_ACCOUNT = 'license-key';
 
-const LICENSE_API_BASE_URL = process.env.LICENSE_API_BASE_URL || 'http://localhost:8787';
+const LOCAL_HELPER_HOST = '127.0.0.1';
+const LOCAL_HELPER_PORT = Number(process.env.LOCAL_HELPER_PORT || 8787);
+const LICENSE_API_BASE_URL = `http://${LOCAL_HELPER_HOST}:${LOCAL_HELPER_PORT}`;
 const BACKEND_REPO_OWNER = process.env.GITHUB_BACKEND_OWNER || '';
 const BACKEND_REPO_NAME = process.env.GITHUB_BACKEND_REPO || '';
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID || '';
@@ -49,6 +53,84 @@ const BUG_REPORTS_PATH = String(process.env.BUG_REPORTS_PATH || 'bug-reports').r
 const ADMIN_PASSWORD = process.env.MDAS_ADMIN_PASSWORD || '';
 
 let adminUnlocked = false;
+let localHelperProcess = null;
+let appIsQuitting = false;
+
+function resolveBackendServerPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'backend', 'server.js');
+  }
+  return path.join(__dirname, '..', 'backend', 'server.js');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForLocalHelperReady(maxAttempts = 40, intervalMs = 250) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${LICENSE_API_BASE_URL}/health`);
+      if (response.ok) return;
+    } catch {
+      // Local helper still starting up.
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error(`Local helper did not become ready at ${LICENSE_API_BASE_URL}.`);
+}
+
+async function startLocalHelperServer() {
+  if (localHelperProcess && !localHelperProcess.killed) return;
+
+  const serverPath = resolveBackendServerPath();
+  if (!existsSync(serverPath)) {
+    throw new Error(`Local helper server not found at ${serverPath}.`);
+  }
+
+  localHelperProcess = spawn(process.execPath, [serverPath], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      HOST: LOCAL_HELPER_HOST,
+      PORT: String(LOCAL_HELPER_PORT),
+    },
+    stdio: 'pipe',
+  });
+
+  localHelperProcess.stdout?.on('data', (chunk) => {
+    process.stdout.write(`[local-helper] ${chunk}`);
+  });
+
+  localHelperProcess.stderr?.on('data', (chunk) => {
+    process.stderr.write(`[local-helper] ${chunk}`);
+  });
+
+  localHelperProcess.on('exit', (code, signal) => {
+    localHelperProcess = null;
+    if (!appIsQuitting) {
+      console.error(`Local helper exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'}).`);
+    }
+  });
+
+  await waitForLocalHelperReady();
+}
+
+async function stopLocalHelperServer() {
+  const proc = localHelperProcess;
+  localHelperProcess = null;
+  if (!proc || proc.killed) return;
+
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    proc.kill('SIGTERM');
+  } catch {
+    // Ignore shutdown errors.
+  }
+}
 
 function getAppPrivateKey() {
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY || '';
@@ -96,6 +178,21 @@ async function clearLicenseSession() {
   await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
 }
 
+async function readCachedLicenseKey() {
+  const value = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_LICENSE_KEY_ACCOUNT);
+  return value ? value.trim() : '';
+}
+
+async function saveCachedLicenseKey(licenseKey) {
+  const normalized = String(licenseKey || '').trim();
+  if (!normalized) return;
+  await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_LICENSE_KEY_ACCOUNT, normalized);
+}
+
+async function clearCachedLicenseKey() {
+  await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_LICENSE_KEY_ACCOUNT);
+}
+
 async function validateWithBackend(payload, token) {
   const response = await fetch(`${LICENSE_API_BASE_URL}/api/validate-license`, {
     method: 'POST',
@@ -114,50 +211,84 @@ async function validateWithBackend(payload, token) {
   return response.json();
 }
 
+function buildSessionFromResult(result, previousSession = {}) {
+  return {
+    token: result.token || previousSession.token,
+    org: result.org ?? previousSession.org,
+    type: result.type ?? previousSession.type,
+    limit: Number(result.limit ?? previousSession.limit ?? 0),
+    requests: Number(result.requests ?? previousSession.requests ?? 0),
+    charLimit: Number(result.charLimit ?? previousSession.charLimit ?? 0),
+    characters: Number(result.characters ?? previousSession.characters ?? 0),
+    expiresAt: Number(result.expires_at ?? previousSession.expiresAt ?? 0),
+    validatedAt: Date.now(),
+  };
+}
+
+function persistStoreLicense(session) {
+  store.set('license', {
+    org: session.org,
+    type: session.type,
+    limit: session.limit,
+    requests: session.requests,
+    charLimit: session.charLimit,
+    characters: session.characters,
+    valid: true,
+  });
+}
+
+async function refreshViaCachedLicenseKey() {
+  const cachedLicenseKey = await readCachedLicenseKey();
+  if (!cachedLicenseKey) {
+    return { valid: false };
+  }
+
+  const result = await validateWithBackend({ licenseKey: cachedLicenseKey });
+  if (!result.valid) {
+    return { valid: false, reason: result.reason || 'invalid' };
+  }
+
+  const session = buildSessionFromResult(result);
+  await saveLicenseSession(session);
+  await saveCachedLicenseKey(cachedLicenseKey);
+  persistStoreLicense(session);
+  return { valid: true, ...session };
+}
+
 async function refreshLicenseSession({ allowStale = true } = {}) {
   const session = await readLicenseSession();
   if (!session?.token) {
-    return { valid: false };
+    try {
+      return await refreshViaCachedLicenseKey();
+    } catch {
+      return { valid: false };
+    }
   }
 
   try {
     const result = await validateWithBackend({}, session.token);
     if (!result.valid) {
       await clearLicenseSession();
-      store.set('license', {
-        org: null,
-        type: null,
-        limit: 0,
-        requests: 0,
-        charLimit: 0,
-        characters: 0,
-        valid: false,
-      });
-      return { valid: false, reason: result.reason || 'invalid' };
+      try {
+        return await refreshViaCachedLicenseKey();
+      } catch {
+        store.set('license', {
+          org: null,
+          type: null,
+          limit: 0,
+          requests: 0,
+          charLimit: 0,
+          characters: 0,
+          valid: false,
+        });
+        return { valid: false, reason: result.reason || 'invalid' };
+      }
     }
 
-    const refreshed = {
-      token: result.token || session.token,
-      org: result.org ?? session.org,
-      type: result.type ?? session.type,
-      limit: Number(result.limit ?? session.limit ?? 0),
-      requests: Number(result.requests ?? session.requests ?? 0),
-      charLimit: Number(result.charLimit ?? session.charLimit ?? 0),
-      characters: Number(result.characters ?? session.characters ?? 0),
-      expiresAt: Number(result.expires_at ?? session.expiresAt ?? 0),
-      validatedAt: Date.now(),
-    };
+    const refreshed = buildSessionFromResult(result, session);
 
     await saveLicenseSession(refreshed);
-    store.set('license', {
-      org: refreshed.org,
-      type: refreshed.type,
-      limit: refreshed.limit,
-      requests: refreshed.requests,
-      charLimit: refreshed.charLimit,
-      characters: refreshed.characters,
-      valid: true,
-    });
+    persistStoreLicense(refreshed);
 
     return { valid: true, ...refreshed };
   } catch {
@@ -352,11 +483,23 @@ function createWindow() {
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  createWindow();
+  startLocalHelperServer()
+    .then(() => {
+      createWindow();
+    })
+    .catch((error) => {
+      dialog.showErrorBox('Local Helper Failed', error.message || 'Could not start local helper service.');
+      app.quit();
+    });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('before-quit', () => {
+  appIsQuitting = true;
+  stopLocalHelperServer();
 });
 
 app.on('window-all-closed', () => {
@@ -393,28 +536,11 @@ ipcMain.handle('license:validateKey', async (_event, licenseKey) => {
     return result;
   }
 
-  const session = {
-    token: result.token,
-    org: result.org,
-    type: result.type,
-    limit: Number(result.limit || 0),
-    requests: Number(result.requests || 0),
-    charLimit: Number(result.charLimit || 0),
-    characters: Number(result.characters || 0),
-    expiresAt: Number(result.expires_at || 0),
-    validatedAt: Date.now(),
-  };
+  const session = buildSessionFromResult(result);
 
   await saveLicenseSession(session);
-  store.set('license', {
-    org: session.org,
-    type: session.type,
-    limit: session.limit,
-    requests: session.requests,
-    charLimit: session.charLimit,
-    characters: session.characters,
-    valid: true,
-  });
+  await saveCachedLicenseKey(licenseKey);
+  persistStoreLicense(session);
 
   return result;
 });
@@ -429,6 +555,7 @@ ipcMain.handle('license:refreshSession', async () => {
 
 ipcMain.handle('license:clearSession', async () => {
   await clearLicenseSession();
+  await clearCachedLicenseKey();
   return { ok: true };
 });
 

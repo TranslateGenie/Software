@@ -154,6 +154,16 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
       )}
 
       <div className="card">
+        <p className="card__title">First Translation Checklist</p>
+        <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <li>Confirm your license is active and quotas are available.</li>
+          <li>Drop a document below and click <strong>Upload</strong>.</li>
+          <li>Wait for workflow processing to complete in the background.</li>
+          <li>Go to <strong>Translations</strong> and download your translated result.</li>
+        </ol>
+      </div>
+
+      <div className="card">
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
           Remaining Requests: <strong>{remainingRequests}</strong> | Remaining Characters: <strong>{remainingCharacters}</strong>
         </p>

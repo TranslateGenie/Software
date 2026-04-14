@@ -37,6 +37,16 @@
       "preload.js",
       "renderer/dist/**",
       "node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!node_modules/.cache/**"
+        ]
+      }
     ]
   }
 }

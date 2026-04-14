@@ -1,0 +1,35 @@
+name: Sign License Repo Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  sign-license-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Sign licenses.json in private repo
+        env:
+          GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_APP_INSTALLATION_ID: ${{ secrets.GITHUB_APP_INSTALLATION_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          LICENSE_REPO_OWNER: ${{ vars.LICENSE_REPO_OWNER }}
+          LICENSE_REPO_NAME: ${{ vars.LICENSE_REPO_NAME }}
+          LICENSES_PATH: ${{ vars.LICENSES_PATH || 'licenses.json' }}
+          LICENSE_SIGNING_PRIVATE_KEY: ${{ secrets.LICENSE_SIGNING_PRIVATE_KEY }}
+        run: node scripts/sign-license-repo.js
