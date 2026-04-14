@@ -1,7 +1,7 @@
 (function () {
   const ENTER_MIN_DELAY_MS = 120;
   const ENTER_MAX_IMAGE_WAIT_MS = 700;
-  const LEAVE_DELAY_MS = 140;
+  const LEAVE_DELAY_MS = 95;
 
   function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
