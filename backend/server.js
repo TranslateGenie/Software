@@ -56,10 +56,6 @@ app.get('/pricing', (_req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'pricing.html'));
 });
 
-app.get('/register', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'web', 'register.html'));
-});
-
 app.get('/license', (_req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'license-delivery.html'));
 });

@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import HomeView from './views/HomeView.jsx';
 import LicenseView from './views/LicenseView.jsx';
 import UploadView from './views/UploadView.jsx';
 import TranslationsView from './views/TranslationsView.jsx';
@@ -50,6 +51,7 @@ export default function App() {
   const [licenseSession, setLicenseSession] = useState({ valid: false });
   const [checkingLicense, setCheckingLicense] = useState(true);
   const [alerts, setAlerts] = useState([]);
+  const [isEnteringLicense, setIsEnteringLicense] = useState(false);
 
   useEffect(() => {
     window.mdas
@@ -102,6 +104,19 @@ export default function App() {
   }
 
   if (!licenseSession?.valid) {
+    if (!isEnteringLicense) {
+      return (
+        <div className="app">
+          <main className="app__body">
+            <HomeView
+              onEnterLicense={() => setIsEnteringLicense(true)}
+              onStatus={updateStatus}
+            />
+          </main>
+          <StatusBar message={statusMessage} level={statusLevel} />
+        </div>
+      );
+    }
     return (
       <div className="app">
         <main className="app__body">
