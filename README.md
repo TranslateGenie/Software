@@ -2,22 +2,6 @@
 
 The only software you need for going from one language to another seamlessly. Translate office documents with zero infrastructure setup. Upload from desktop, download a few moments later. It really is THAT easy! Completely private and secure, empowered entirely with Azure AI. Simply purchase a license, download the desktop app, and start translating your documents today. No more copy-pasting or manual translation work. Translate Genie is your one-stop solution for all your document translation needs. With multiple pricing tiers to choose from, you can select the plan that best fits your organization's needs.
 
-## Runtime Architecture
-
-- Electron desktop app starts and manages a local Express helper process.
-- The local helper handles license/API orchestration through local HTTP endpoints.
-- Azure and Square secrets should remain outside the desktop runtime.
-
-## v1 Security Hardening
-
-See [docs/security-v1.md](docs/security-v1.md) for:
-
-- GitHub App least-privilege scope checklist
-- Lightweight license signature verification model
-- Signing workflow and required secrets
-- Key-rotation runbook
-- CI security workflows
-
 ## User Journey: Landing Page to First Translation
 
 1. Visit the website landing page and review product details and supported formats.
