@@ -1,5 +1,5 @@
 export function downloadInstallerHandler(_req, res) {
-  const installerUrl = process.env.INSTALLER_URL || 'https://example.com/downloads/mdas-installer.exe';
+  const installerUrl = 'https://github.com/TranslateGenie/Software/releases/latest/download/mdas-installer.exe';
 
   return res.status(200).json({
     ok: true,
