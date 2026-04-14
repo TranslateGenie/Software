@@ -49,7 +49,7 @@ app.get('/api/download-installer', downloadInstallerHandler);
 app.post('/api/square-webhook', squareWebhookHandler);
 
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'web', 'home.html'));
+  res.sendFile(path.join(__dirname, 'web', 'index.html'));
 });
 
 app.get('/pricing', (_req, res) => {
