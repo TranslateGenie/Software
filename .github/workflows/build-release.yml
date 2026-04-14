@@ -89,7 +89,6 @@ jobs:
           "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "release_name=Release $tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "prerelease=$isPrerelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "installer_url=https://github.com/${{ github.repository }}/releases/download/$tag/mdas-installer.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         shell: pwsh
 
       - name: Create or update release
@@ -116,6 +115,7 @@ jobs:
         shell: pwsh
 
       - name: Find and upload installer
+        id: upload_installer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -131,13 +131,18 @@ jobs:
           $installer = $installers[0]
           Write-Output "Uploading installer: $($installer.FullName)"
           
-          # Upload with a stable filename so download URLs stay consistent.
-          gh release upload "${{ steps.meta.outputs.tag_name }}" "$($installer.FullName)#mdas-installer.exe" --clobber
+          # Upload using Electron Builder's native filename.
+          gh release upload "${{ steps.meta.outputs.tag_name }}" "$($installer.FullName)" --clobber
+
+          $installerName = $installer.Name
+          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag_name }}/$installerName"
+          "installer_name=$installerName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_url=$installerUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         shell: pwsh
 
       - name: Output installer URL
         run: |
-          $installer_url = "${{ steps.meta.outputs.installer_url }}"
+          $installer_url = "${{ steps.upload_installer.outputs.installer_url }}"
           Write-Output "INSTALLER_URL=$installer_url" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output "Installer URL: $installer_url"
         shell: pwsh
