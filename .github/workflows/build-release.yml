@@ -1,0 +1,121 @@
+name: Build & Release Electron App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Electron app dependencies
+        run: npm ci --prefix electron
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Build Electron app
+        run: npm run build --prefix electron
+        env:
+          # Optionally set INSTALLER_URL for download handler
+          # This will be replaced with the actual release URL after publishing
+          INSTALLER_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mdas-installer.exe
+
+      - name: List build artifacts
+        run: |
+          ls -R electron/dist
+        shell: pwsh
+
+      - name: Sign installer
+        if: github.ref_type == 'tag'
+        # TODO: Uncomment and configure if you have a code signing certificate
+        # Steps to set up:
+        # 1. Store your .pfx certificate in GitHub Secrets as WINDOWS_CERT_B64
+        # 2. Set the certificate password in GitHub Secrets as WINDOWS_CERT_PASSWORD
+        # 3. Uncomment the following block
+        #
+        # run: |
+        #   $cert_b64 = "${{ secrets.WINDOWS_CERT_B64 }}"
+        #   $cert_path = "C:\temp\cert.pfx"
+        #   [IO.File]::WriteAllBytes($cert_path, [Convert]::FromBase64String($cert_b64))
+        #   $timestamp_server = "http://timestamp.globalsign.com/scripts/timstamp.dll"
+        #   signtool sign /f $cert_path /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /t "$timestamp_server" "electron\dist\MDAS-*.exe"
+        #   Remove-Item $cert_path
+        # shell: pwsh
+        run: echo "Code signing not configured yet. To enable, set WINDOWS_CERT_B64 and WINDOWS_CERT_PASSWORD secrets."
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', github.run_number) }}
+          release_name: Release ${{ github.ref_name || format('v{0}', github.run_number) }}
+          draft: false
+          prerelease: ${{ github.ref_type != 'tag' }}
+
+      - name: Find and upload installer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the built installer
+          $installers = Get-ChildItem -Path "electron/dist" -Filter "*.exe" -Recurse
+          if ($installers.Count -eq 0) {
+            Write-Error "No .exe files found in electron/dist"
+            exit 1
+          }
+          
+          $installer = $installers[0]
+          Write-Output "Uploading installer: $($installer.FullName)"
+          
+          # Upload via GitHub CLI
+          gh release upload "${{ steps.create_release.outputs.tag_name }}" "$($installer.FullName)" --clobber
+        shell: pwsh
+
+      - name: Output installer URL
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^refs/tags/', ''
+          if (-not $tag -or $tag -eq 'HEAD') {
+            $tag = "v${{ github.run_number }}"
+          }
+          $installer_url = "https://github.com/${{ github.repository }}/releases/download/$tag/mdas-installer.exe"
+          Write-Output "INSTALLER_URL=$installer_url" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "Installer URL: $installer_url"
+        shell: pwsh
+
+  update-env:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update download handler environment
+        run: |
+          # This step documents where INSTALLER_URL should be set
+          # In production, you would store this in your deployment environment
+          echo "The installer is now available at: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mdas-installer.exe"
+          echo "Set INSTALLER_URL environment variable or update your deployment to use this URL."

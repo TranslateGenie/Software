@@ -20,3 +20,52 @@ The only software you need for going from one language to another seamlessly. Tr
 - You only need to enter the license key once unless it is revoked or cleared.
 - Remaining request and character quotas are shown in-app before upload.
 - If quotas are near limits, the app shows warnings and prompts renewal.
+
+## Development
+
+### Local Setup
+
+```bash
+# Install all dependencies
+npm install
+npm install --prefix electron
+npm install --prefix backend
+
+# Run development server
+npm run backend:dev
+
+# Run Electron dev (from electron directory)
+npm run dev --prefix electron
+```
+
+### Building for Release
+
+To create a release:
+
+```bash
+# Create and push a semantic version tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The GitHub Actions workflow will automatically:
+- Build the Electron app
+- Create a GitHub Release
+- Upload the signed installer
+- Make it available for download
+
+For detailed release instructions, see [.github/RELEASE_WORKFLOW.md](.github/RELEASE_WORKFLOW.md).
+
+## Architecture
+
+- **Website**: Static HTML/CSS deployed to GitHub Pages (no backend server)
+	- Marketing, pricing, license delivery, download pages
+- **Electron App**: Desktop application with embedded Express server
+	- License activation, document upload, translation management
+- **GitHub Actions**: Automated pipelines for
+	- Website deployment
+	- Document translation processing
+	- License data signing
+	- Security checks and audits
+	- Installer build and release
+- **Square Webhooks**: License creation and updates
