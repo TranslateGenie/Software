@@ -5,8 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Translate Genie SaaS</title>
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    body.preload main {
+      opacity: 0;
+    }
+
+    body.ready main {
+      opacity: 1;
+      transition: opacity 180ms ease;
+    }
+  </style>
 </head>
-<body>
+<body class="preload">
   <main>
     <div class="nav">
       <img src="Mascot.png" alt="Translate Genie Logo" style="height: 40px; margin-right: -1rem; margin-top: -0.75rem;" />
@@ -32,5 +42,43 @@
       </div>
     </section>
   </main>
+  <script>
+    (function () {
+      const MIN_DELAY_MS = 140;
+      const MAX_WAIT_MS = 700;
+
+      function loadImage(img) {
+        if (img.complete) return Promise.resolve();
+        return new Promise((resolve) => {
+          const done = () => resolve();
+          img.addEventListener("load", done, { once: true });
+          img.addEventListener("error", done, { once: true });
+        });
+      }
+
+      async function revealWhenReady() {
+        const start = Date.now();
+        const images = Array.from(document.querySelectorAll("main img"));
+        const waitForImages = Promise.all(images.map(loadImage));
+        const timeout = new Promise((resolve) => setTimeout(resolve, MAX_WAIT_MS));
+
+        await Promise.race([waitForImages, timeout]);
+
+        const elapsed = Date.now() - start;
+        if (elapsed < MIN_DELAY_MS) {
+          await new Promise((resolve) => setTimeout(resolve, MIN_DELAY_MS - elapsed));
+        }
+
+        document.body.classList.remove("preload");
+        document.body.classList.add("ready");
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", revealWhenReady, { once: true });
+      } else {
+        revealWhenReady();
+      }
+    })();
+  </script>
 </body>
 </html>
