@@ -28,8 +28,9 @@
     "wait-on": "^8.0.5"
   },
   "build": {
-    "appId": "com.mdas.app",
-    "productName": "MDAS",
+    "appId": "com.translategenie.app",
+    "productName": "Translate Genie",
+    "icon": "Logo.png",
     "directories": {
       "output": "dist"
     },

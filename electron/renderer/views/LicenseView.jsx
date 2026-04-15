@@ -61,7 +61,7 @@ export default function LicenseView({ onValidated, onStatus }) {
             type="password"
             value={licenseKey}
             onChange={(e) => setLicenseKey(e.target.value)}
-            placeholder="MDAS-XXXX-XXXX-XXXX"
+            placeholder="TGSA-XXXX-XXXX-XXXX"
             autoComplete="off"
           />
         </div>

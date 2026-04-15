@@ -131,7 +131,7 @@ export default function App() {
     <div className="app">
       {/* ── Header / Navigation ─────────────────────────────────────── */}
       <header className="app__header">
-        <span className="app__logo">📄 MDAS</span>
+        <span className="app__logo">Translate Genie</span>
         <nav className="app__nav">
           {availableViews.map((view) => (
             <button
