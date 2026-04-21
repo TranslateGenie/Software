@@ -1,6 +1,6 @@
 /**
  * TranslationsView.jsx — Browse and download translated files.
- * Polls GitHub for new results and lets the user download them.
+ * Polls the local Express helper for new results and lets the user download them.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -51,10 +51,11 @@ export default function TranslationsView({ onStatus }) {
     onStatus(`Downloading ${file.name}…`, 'warn');
     try {
       const { content, encoding } = await window.mdas.downloadFile({
-        filePath: `translations/${lang}/${file.name}`,
+        translationId: file.id,
+        lang,
       });
 
-      // content comes back as base64 from the GitHub API
+      // content comes back as base64 from the local helper API
       const base64 = encoding === 'base64' ? content.replace(/\n/g, '') : btoa(content);
 
       const savePath = await window.mdas.saveFileDialog(file.name);
@@ -121,7 +122,7 @@ export default function TranslationsView({ onStatus }) {
             <div className="empty-state__icon">📭</div>
             <p>No translated files yet for {LANG_LABELS[activeLang]}.</p>
             <p style={{ fontSize: 12, marginTop: 6 }}>
-              Upload documents and wait for GitHub Actions to process them.
+              Upload documents and wait for the local translation helper to process them.
             </p>
           </div>
         ) : (

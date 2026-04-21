@@ -29,11 +29,11 @@ contextBridge.exposeInMainWorld('mdas', {
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
   openPricingPage: () => ipcRenderer.invoke('app:openPricingPage'),
 
-  // ── GitHub ────────────────────────────────────────────────────────────────
-  uploadFile: (payload) => ipcRenderer.invoke('github:uploadFile', payload),
-  listTranslations: (lang) => ipcRenderer.invoke('github:listTranslations', lang),
-  downloadFile: (payload) => ipcRenderer.invoke('github:downloadFile', payload),
-  listIncoming: () => ipcRenderer.invoke('github:listIncoming'),
+  // ── Translation APIs ──────────────────────────────────────────────────────
+  uploadFile: (payload) => ipcRenderer.invoke('translation:uploadFile', payload),
+  listTranslations: (lang) => ipcRenderer.invoke('translation:listTranslations', lang),
+  downloadFile: (payload) => ipcRenderer.invoke('translation:downloadFile', payload),
+  listIncoming: () => ipcRenderer.invoke('translation:listPending'),
 
   // ── Bug reports ───────────────────────────────────────────────────────────
   listBugReports: (payload) => ipcRenderer.invoke('bugReports:list', payload),

@@ -1,6 +1,6 @@
 /**
  * UploadView.jsx — Main upload screen.
- * Allows the user to drag-and-drop or browse for files, then upload to GitHub.
+ * Allows the user to drag-and-drop or browse for files, then send them to the local helper.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -118,6 +118,7 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
         await window.mdas.uploadFile({
           fileName: entry.file.name,
           base64Content,
+          mimeType: entry.file.type || 'application/octet-stream',
         });
         updateEntry(entry.id, { status: 'uploaded' });
         successCount++;
@@ -130,10 +131,10 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
     setIsUploading(false);
 
     if (errorCount === 0) {
-      setAlert({ type: 'success', text: `${successCount} file(s) uploaded successfully. GitHub Actions will now process them.` });
+      setAlert({ type: 'success', text: `${successCount} file(s) uploaded and translated successfully.` });
       onStatus(`${successCount} file(s) uploaded`, 'ok');
     } else {
-      setAlert({ type: 'error', text: `${errorCount} file(s) failed to upload. Check your GitHub settings.` });
+      setAlert({ type: 'error', text: `${errorCount} file(s) failed to upload. Check local helper and cloud settings.` });
       onStatus(`${errorCount} upload error(s)`, 'error');
     }
   };
@@ -158,7 +159,7 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
         <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <li>Confirm your license is active and quotas are available.</li>
           <li>Drop a document below and click <strong>Upload</strong>.</li>
-          <li>Wait for workflow processing to complete in the background.</li>
+          <li>Wait for local helper processing to complete.</li>
           <li>Go to <strong>Translations</strong> and download your translated result.</li>
         </ol>
       </div>
@@ -208,7 +209,7 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
         <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <li>Drop your DOCX, PPTX, XLSX, or PDF documents above.</li>
           <li>Click <strong>Upload</strong> — files are sent securely to the managed translation backend.</li>
-          <li>GitHub Actions automatically translates them and stores results in <code>translations/</code>.</li>
+          <li>The local Express helper translates them and stores results in S3.</li>
           <li>Switch to <strong>Translations</strong> to download the results when they are ready.</li>
         </ol>
       </div>

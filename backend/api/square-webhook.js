@@ -1,4 +1,4 @@
-import { loadLicenses, saveLicenses, loadApiKeys, parseApiKeysSchema } from '../lib/github-data.js';
+import { loadLicenses, saveLicenses, loadApiKeys, parseApiKeysSchema } from '../lib/s3-data.js';
 
 const PACK_INCREMENTS = {
   starter: { requests: 100, characters: 2000000 },
@@ -43,7 +43,7 @@ export async function squareWebhookHandler(req, res) {
       return res.status(500).json({ ok: false, error: 'No Square keys configured in apiks.json' });
     }
 
-    const { json: licenses, sha } = await loadLicenses();
+    const { json: licenses, etag } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });
     }
@@ -68,7 +68,7 @@ export async function squareWebhookHandler(req, res) {
       licenses[index].charLimit = Number(licenses[index].charLimit || 0) + increment.characters;
     }
 
-    await saveLicenses(licenses, sha, `chore: square webhook ${eventType} for ${org} [skip ci]`);
+    await saveLicenses(licenses, etag, `square webhook ${eventType} for ${org}`);
     return res.status(200).json({ ok: true, org, eventType });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Failed to process square webhook' });

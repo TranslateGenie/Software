@@ -1,4 +1,4 @@
-import { loadLicenses, saveLicenses } from '../lib/github-data.js';
+import { loadLicenses, saveLicenses } from '../lib/s3-data.js';
 
 const TIER_CONFIG = {
   T1: { userRange: '1-20', requestLimit: 500, charLimit: 10000000 },
@@ -39,7 +39,7 @@ export async function registerOrgHandler(req, res) {
   }
 
   try {
-    const { json: licenses, sha } = await loadLicenses();
+    const { json: licenses, etag } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });
     }
@@ -57,7 +57,7 @@ export async function registerOrgHandler(req, res) {
     };
 
     licenses.push(newRecord);
-    await saveLicenses(licenses, sha, `chore: register org ${org} [skip ci]`);
+    await saveLicenses(licenses, etag, `chore: register org ${org}`);
 
     return res.status(201).json({
       ok: true,

@@ -5,7 +5,21 @@ import { validateLicenseHandler } from './api/validate-license.js';
 import { registerOrgHandler } from './api/register-org.js';
 import { downloadInstallerHandler } from './api/download-installer.js';
 import { squareWebhookHandler } from './api/square-webhook.js';
-import { loadLicenses } from './lib/github-data.js';
+import {
+  translateHandler,
+  listTranslationsHandler,
+  getTranslationHandler,
+  getTranslationFileHandler,
+} from './api/translations.js';
+import {
+  listBugReportsHandler,
+  getBugReportHandler,
+  createBugReportHandler,
+  addBugReportCommentHandler,
+  updateBugReportStatusHandler,
+  updateBugReportDetailsHandler,
+} from './api/bug-reports.js';
+import { loadLicenses } from './lib/s3-data.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,9 +58,23 @@ app.get('/health/signature', async (_req, res) => {
 });
 
 app.post('/api/validate-license', validateLicenseHandler);
+app.get('/api/license/:key', async (req, res) => {
+  req.body = { licenseKey: req.params.key };
+  return validateLicenseHandler(req, res);
+});
 app.post('/api/register-org', registerOrgHandler);
 app.get('/api/download-installer', downloadInstallerHandler);
 app.post('/api/square-webhook', squareWebhookHandler);
+app.post('/api/translate', translateHandler);
+app.get('/api/translations', listTranslationsHandler);
+app.get('/api/translation/:id', getTranslationHandler);
+app.get('/api/translation/:id/file', getTranslationFileHandler);
+app.get('/api/bug-reports', listBugReportsHandler);
+app.get('/api/bug-reports/:id', getBugReportHandler);
+app.post('/api/bug-reports', createBugReportHandler);
+app.post('/api/bug-reports/:id/comments', addBugReportCommentHandler);
+app.patch('/api/bug-reports/:id/status', updateBugReportStatusHandler);
+app.patch('/api/bug-reports/:id', updateBugReportDetailsHandler);
 
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'index.html'));

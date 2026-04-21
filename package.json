@@ -8,8 +8,7 @@
     "start": "npm run start --prefix electron",
     "backend": "npm run start --prefix backend",
     "backend:dev": "npm run dev --prefix backend",
-    "build": "npm run build --prefix electron",
-    "translate": "node scripts/translate-docs.js"
+    "build": "npm run build --prefix electron"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.8.10",

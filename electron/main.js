@@ -10,10 +10,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 import Store from 'electron-store';
-import { Octokit } from '@octokit/rest';
-import { createAppAuth } from '@octokit/auth-app';
 import keytar from 'keytar';
 import { config as loadDotenv } from 'dotenv';
 
@@ -47,14 +44,8 @@ const KEYTAR_LICENSE_KEY_ACCOUNT = 'license-key';
 const LOCAL_HELPER_HOST = '127.0.0.1';
 const LOCAL_HELPER_PORT = Number(process.env.LOCAL_HELPER_PORT || 8787);
 const LICENSE_API_BASE_URL = `http://${LOCAL_HELPER_HOST}:${LOCAL_HELPER_PORT}`;
-const BACKEND_REPO_OWNER = process.env.GITHUB_BACKEND_OWNER || '';
-const BACKEND_REPO_NAME = process.env.GITHUB_BACKEND_REPO || '';
-const GITHUB_APP_ID = process.env.GITHUB_APP_ID || '';
-const GITHUB_APP_INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID || '';
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || '';
 const PRICING_PAGE_URL = process.env.PRICING_PAGE_URL || 'https://example.github.io/mdas/pricing.html';
-const BUG_REPORTS_REPO_OWNER = process.env.BUG_REPORTS_REPO_OWNER || BACKEND_REPO_OWNER;
-const BUG_REPORTS_REPO_NAME = process.env.BUG_REPORTS_REPO_NAME || BACKEND_REPO_NAME;
-const BUG_REPORTS_PATH = String(process.env.BUG_REPORTS_PATH || 'bug-reports').replace(/^\/+|\/+$/g, '');
 const ADMIN_PASSWORD = process.env.MDAS_ADMIN_PASSWORD || '';
 
 let adminUnlocked = false;
@@ -135,34 +126,6 @@ async function stopLocalHelperServer() {
   } catch {
     // Ignore shutdown errors.
   }
-}
-
-function getAppPrivateKey() {
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY || '';
-  if (!privateKey) {
-    throw new Error('GitHub App private key is not configured in environment.');
-  }
-  return privateKey.replace(/\\n/g, '\n');
-}
-
-function ensureGitHubAppConfig() {
-  if (!GITHUB_APP_ID || !GITHUB_APP_INSTALLATION_ID || !BACKEND_REPO_OWNER || !BACKEND_REPO_NAME) {
-    throw new Error('GitHub App backend settings are incomplete. Set app ID, installation ID, owner, and repo.');
-  }
-}
-
-async function getInstallationOctokit() {
-  ensureGitHubAppConfig();
-  const privateKey = getAppPrivateKey();
-
-  return new Octokit({
-    authStrategy: createAppAuth,
-    auth: {
-      appId: GITHUB_APP_ID,
-      privateKey,
-      installationId: GITHUB_APP_INSTALLATION_ID,
-    },
-  });
 }
 
 async function readLicenseSession() {
@@ -304,123 +267,32 @@ async function refreshLicenseSession({ allowStale = true } = {}) {
   }
 }
 
-function getBugReportsRepoConfig() {
-  if (!BUG_REPORTS_REPO_OWNER || !BUG_REPORTS_REPO_NAME) {
-    throw new Error('Bug reports repository settings are incomplete. Set BUG_REPORTS_REPO_OWNER and BUG_REPORTS_REPO_NAME.');
+async function requestLocalHelper(pathname, options = {}) {
+  const response = await fetch(`${LICENSE_API_BASE_URL}${pathname}`, options);
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Local helper request failed for ${pathname}`);
   }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
   return {
-    owner: BUG_REPORTS_REPO_OWNER,
-    repo: BUG_REPORTS_REPO_NAME,
+    content: buffer.toString('base64'),
+    encoding: 'base64',
   };
 }
 
-function isNotFoundError(error) {
-  return Number(error?.status) === 404;
-}
-
-async function getRepoJsonFile({ owner, repo, path: filePath }) {
-  const octokit = await getInstallationOctokit();
-  const { data } = await octokit.repos.getContent({
-    owner,
-    repo,
-    path: filePath,
-  });
-
-  if (Array.isArray(data) || !data.content) {
-    throw new Error(`Expected JSON file at ${filePath}`);
+function resolveConfiguredTargetLanguage(langAlias) {
+  const configuredThird = String(store.get('customLanguageCode') || '').trim().toLowerCase();
+  if (langAlias === 'third') {
+    return configuredThird || null;
   }
-
-  const decoded = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
-  return {
-    json: JSON.parse(decoded),
-    sha: data.sha,
-    path: data.path,
-  };
-}
-
-async function writeRepoJsonFile({ owner, repo, path: filePath, json, sha, message }) {
-  const octokit = await getInstallationOctokit();
-  await octokit.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    path: filePath,
-    message,
-    content: Buffer.from(JSON.stringify(json, null, 2) + '\n', 'utf8').toString('base64'),
-    ...(sha ? { sha } : {}),
-  });
-}
-
-function normalizeBugReport(report, filePath) {
-  return {
-    id: String(report?.id || filePath?.split('/').pop()?.replace(/\.json$/i, '') || randomUUID()),
-    title: String(report?.title || 'Untitled report'),
-    description: String(report?.description || ''),
-    createdBy: String(report?.createdBy || 'anonymous'),
-    createdAt: String(report?.createdAt || new Date().toISOString()),
-    status: String(report?.status || 'open'),
-    comments: Array.isArray(report?.comments)
-      ? report.comments.map((item) => ({
-          author: String(item?.author || 'user'),
-          message: String(item?.message || ''),
-          timestamp: String(item?.timestamp || new Date().toISOString()),
-        }))
-      : [],
-  };
-}
-
-async function listBugReportsRaw() {
-  const { owner, repo } = getBugReportsRepoConfig();
-  const octokit = await getInstallationOctokit();
-
-  let entries = [];
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner,
-      repo,
-      path: BUG_REPORTS_PATH,
-    });
-    entries = Array.isArray(data)
-      ? data.filter((item) => item.type === 'file' && item.name.endsWith('.json'))
-      : [];
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return [];
-    }
-    throw error;
-  }
-
-  const reports = await Promise.all(
-    entries.map(async (entry) => {
-      try {
-        const { json } = await getRepoJsonFile({ owner, repo, path: entry.path });
-        return normalizeBugReport(json, entry.path);
-      } catch {
-        return null;
-      }
-    })
-  );
-
-  return reports.filter(Boolean).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-function nextBugReportId(existingIds) {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(now.getUTCDate()).padStart(2, '0');
-  const datePrefix = `${year}-${month}-${day}`;
-
-  const used = new Set(
-    existingIds
-      .map((id) => String(id || ''))
-      .filter((id) => id.startsWith(`${datePrefix}-`))
-      .map((id) => Number(id.slice(-3)))
-      .filter((value) => Number.isFinite(value))
-  );
-
-  let seq = 1;
-  while (used.has(seq)) seq += 1;
-  return `${datePrefix}-${String(seq).padStart(3, '0')}`;
+  return langAlias;
 }
 
 function assertAdmin() {
@@ -608,287 +480,203 @@ ipcMain.handle('admin:logout', async () => {
 
 ipcMain.handle('admin:isUnlocked', async () => ({ ok: true, unlocked: adminUnlocked }));
 
-// ─── GitHub IPC ────────────────────────────────────────────────────────────────
+// ─── Translation IPC ───────────────────────────────────────────────────────────
 
 /**
- * Upload a file to /incoming/<org>/ in the configured GitHub repository.
+ * Upload a file to the local helper translation API.
  * The renderer passes the file content as a base64 string.
  */
-ipcMain.handle('github:uploadFile', async (_event, { fileName, base64Content }) => {
+ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Content, targetLanguage = 'en', mimeType = 'text/plain' }) => {
   const session = await readLicenseSession();
   if (!session?.token || !session?.org) {
     throw new Error('A valid license is required before uploading documents.');
   }
 
-  const quota = await validateWithBackend({}, session.token);
-  if (!quota?.valid) {
-    throw new Error('Your translation quota has been reached. Please purchase additional request packs.');
-  }
+  const configuredLanguages = Array.isArray(store.get('targetLanguages'))
+    ? store.get('targetLanguages')
+    : [targetLanguage || 'en'];
 
-  const octokit = await getInstallationOctokit();
-  const repoPath = `incoming/${session.org}/${fileName}`;
+  const requestedLanguages = configuredLanguages
+    .map((lang) => resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase()))
+    .filter(Boolean);
 
-  // Check if the file already exists so we can provide the SHA for updates
-  let existingSha;
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner: BACKEND_REPO_OWNER,
-      repo: BACKEND_REPO_NAME,
-      path: repoPath,
+  const uniqueLanguages = [...new Set(requestedLanguages.length > 0 ? requestedLanguages : [targetLanguage || 'en'])];
+
+  const results = [];
+  for (const lang of uniqueLanguages) {
+    const result = await requestLocalHelper('/api/translate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({
+        fileName,
+        base64Content,
+        targetLanguage: lang,
+        mimeType,
+      }),
     });
-    existingSha = data.sha;
-  } catch {
-    // File does not exist yet — that is the normal first-upload case
+    results.push(result);
   }
 
-  await octokit.repos.createOrUpdateFileContents({
-    owner: BACKEND_REPO_OWNER,
-    repo: BACKEND_REPO_NAME,
-    path: repoPath,
-    message: `Upload ${fileName} for translation`,
-    content: base64Content,
-    ...(existingSha ? { sha: existingSha } : {}),
-  });
+  const latestResult = results[results.length - 1];
+  if (latestResult?.usage) {
+    const updatedSession = {
+      ...session,
+      requests: Number(latestResult.usage.requests || session.requests || 0),
+      limit: Number(latestResult.usage.limit || session.limit || 0),
+      characters: Number(latestResult.usage.characters || session.characters || 0),
+      charLimit: Number(latestResult.usage.charLimit || session.charLimit || 0),
+      validatedAt: Date.now(),
+    };
+    await saveLicenseSession(updatedSession);
+    persistStoreLicense(updatedSession);
+  }
 
-  return { ok: true, path: repoPath };
+  return {
+    ok: true,
+    ids: results.map((item) => item.translationId),
+    name: fileName,
+    targetLanguages: uniqueLanguages,
+  };
 });
 
 /**
- * List translated files available for a given language folder.
- * Returns an array of { name, downloadUrl, sha } objects.
+ * List translated files available for a given language.
+ * Returns an array of translation metadata entries.
  */
-ipcMain.handle('github:listTranslations', async (_event, lang) => {
+ipcMain.handle('translation:listTranslations', async (_event, lang) => {
   const session = await readLicenseSession();
   if (!session?.token || !session?.org) {
     throw new Error('A valid license is required before browsing translations.');
   }
 
-  const octokit = await getInstallationOctokit();
-
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner: BACKEND_REPO_OWNER,
-      repo: BACKEND_REPO_NAME,
-      path: `translations/${session.org}/${lang}`,
-    });
-
-    // Filter out .gitkeep placeholder
-    const files = Array.isArray(data)
-      ? data
-          .filter((f) => f.type === 'file' && f.name !== '.gitkeep')
-          .map(({ name, download_url, sha }) => ({ name, downloadUrl: download_url, sha }))
-      : [];
-
-    return files;
-  } catch {
+  const resolvedLang = resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase());
+  if (!resolvedLang) {
     return [];
   }
+
+  const response = await requestLocalHelper(`/api/translations?lang=${encodeURIComponent(resolvedLang)}`, {
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+    },
+  });
+
+  return Array.isArray(response?.items)
+    ? response.items.map((item) => ({
+        id: item.id,
+        name: item.fileName,
+        sha: item.id,
+        lang,
+        createdAt: item.createdAt,
+      }))
+    : [];
 });
 
 /**
- * Download a translated file from GitHub.
+ * Download a translated file from local helper/S3 storage.
  * Returns the file content as a base64 string.
  */
-ipcMain.handle('github:downloadFile', async (_event, { filePath }) => {
+ipcMain.handle('translation:downloadFile', async (_event, { translationId, lang }) => {
   const session = await readLicenseSession();
   if (!session?.token || !session?.org) {
     throw new Error('A valid license is required before downloading.');
   }
 
-  const octokit = await getInstallationOctokit();
-  const resolvedPath = filePath.startsWith(`translations/${session.org}/`)
-    ? filePath
-    : filePath.startsWith('translations/')
-      ? filePath.replace('translations/', `translations/${session.org}/`)
-      : filePath;
+  const resolvedLang = resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase());
+  if (!translationId || !resolvedLang) {
+    throw new Error('translationId and lang are required for download.');
+  }
 
-  const { data } = await octokit.repos.getContent({
-    owner: BACKEND_REPO_OWNER,
-    repo: BACKEND_REPO_NAME,
-    path: resolvedPath,
+  return requestLocalHelper(`/api/translation/${encodeURIComponent(translationId)}/file?lang=${encodeURIComponent(resolvedLang)}`, {
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+    },
   });
-
-  return { content: data.content, encoding: data.encoding };
 });
 
 /**
- * List files currently in incoming/<org> so the UI can show pending items.
+ * Placeholder for pending jobs queue support.
  */
-ipcMain.handle('github:listIncoming', async () => {
-  const session = await readLicenseSession();
-  if (!session?.token || !session?.org) return [];
-
-  const octokit = await getInstallationOctokit();
-  try {
-    const { data } = await octokit.repos.getContent({
-      owner: BACKEND_REPO_OWNER,
-      repo: BACKEND_REPO_NAME,
-      path: `incoming/${session.org}`,
-    });
-    return Array.isArray(data)
-      ? data
-          .filter((f) => f.type === 'file' && f.name !== '.gitkeep')
-          .map(({ name, sha }) => ({ name, sha }))
-      : [];
-  } catch {
-    return [];
-  }
+ipcMain.handle('translation:listPending', async () => {
+  return [];
 });
 
 ipcMain.handle('bugReports:list', async (_event, { page = 1, pageSize = 10 } = {}) => {
-  const reports = await listBugReportsRaw();
-  const total = reports.length;
-  const safePageSize = Math.max(1, Number(pageSize) || 10);
-  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
-  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
-  const start = (safePage - 1) * safePageSize;
-  const items = reports.slice(start, start + safePageSize).map((report) => ({
-    id: report.id,
-    title: report.title,
-    createdAt: report.createdAt,
-    status: report.status,
-    createdBy: report.createdBy,
-    commentCount: report.comments.length,
-  }));
-
+  const response = await requestLocalHelper(`/api/bug-reports?page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(pageSize)}`);
   return {
-    items,
-    total,
-    page: safePage,
-    pageSize: safePageSize,
-    totalPages,
+    items: response.items || [],
+    total: Number(response.total || 0),
+    page: Number(response.page || 1),
+    pageSize: Number(response.pageSize || 10),
+    totalPages: Number(response.totalPages || 1),
   };
 });
 
 ipcMain.handle('bugReports:get', async (_event, id) => {
-  const reports = await listBugReportsRaw();
-  const report = reports.find((item) => item.id === id);
-  if (!report) {
-    throw new Error('Bug report not found.');
-  }
-  return report;
+  const response = await requestLocalHelper(`/api/bug-reports/${encodeURIComponent(id)}`);
+  return response.item;
 });
 
 ipcMain.handle('bugReports:create', async (_event, payload) => {
-  const reports = await listBugReportsRaw();
-  const nextId = nextBugReportId(reports.map((item) => item.id));
-  const { owner, repo } = getBugReportsRepoConfig();
-  const createdAt = new Date().toISOString();
-  const report = normalizeBugReport({
-    id: nextId,
-    title: String(payload?.title || '').trim(),
-    description: String(payload?.description || '').trim(),
-    createdBy: String(payload?.createdBy || 'anonymous').trim() || 'anonymous',
-    createdAt,
-    status: 'open',
-    comments: [],
+  const response = await requestLocalHelper('/api/bug-reports', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload || {}),
   });
-
-  if (!report.title || !report.description) {
-    throw new Error('Title and description are required.');
-  }
-
-  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${report.id}.json`);
-  await writeRepoJsonFile({
-    owner,
-    repo,
-    path: reportPath,
-    json: report,
-    message: `chore: add bug report ${report.id} [skip ci]`,
-  });
-
-  return report;
+  return response.item;
 });
 
 ipcMain.handle('bugReports:addComment', async (_event, payload) => {
   assertAdmin();
-  const { owner, repo } = getBugReportsRepoConfig();
   const id = String(payload?.id || '');
-  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
-  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
-  const report = normalizeBugReport(json, reportPath);
-  const message = String(payload?.message || '').trim();
-  if (!message) {
-    throw new Error('Comment message is required.');
-  }
-
-  report.comments.push({
-    author: 'admin',
-    message,
-    timestamp: new Date().toISOString(),
+  const response = await requestLocalHelper(`/api/bug-reports/${encodeURIComponent(id)}/comments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-unlocked': 'true',
+    },
+    body: JSON.stringify({ message: payload?.message || '' }),
   });
-
-  await writeRepoJsonFile({
-    owner,
-    repo,
-    path: reportPath,
-    json: report,
-    sha,
-    message: `chore: comment on bug report ${report.id} [skip ci]`,
-  });
-
-  return report;
+  return response.item;
 });
 
 ipcMain.handle('bugReports:updateStatus', async (_event, payload) => {
   assertAdmin();
-  const allowedStatuses = new Set(['open', 'in progress', 'resolved']);
-  const nextStatus = String(payload?.status || '').toLowerCase();
-  if (!allowedStatuses.has(nextStatus)) {
-    throw new Error('Status must be one of: open, in progress, resolved.');
-  }
-
-  const { owner, repo } = getBugReportsRepoConfig();
   const id = String(payload?.id || '');
-  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
-  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
-  const report = normalizeBugReport(json, reportPath);
-  report.status = nextStatus;
-
-  await writeRepoJsonFile({
-    owner,
-    repo,
-    path: reportPath,
-    json: report,
-    sha,
-    message: `chore: update bug report ${report.id} status [skip ci]`,
+  const response = await requestLocalHelper(`/api/bug-reports/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-unlocked': 'true',
+    },
+    body: JSON.stringify({ status: payload?.status || '' }),
   });
-
-  return report;
+  return response.item;
 });
 
 ipcMain.handle('bugReports:updateDetails', async (_event, payload) => {
   assertAdmin();
-  const { owner, repo } = getBugReportsRepoConfig();
   const id = String(payload?.id || '');
-  const reportPath = path.posix.join(BUG_REPORTS_PATH, `${id}.json`);
-  const { json, sha } = await getRepoJsonFile({ owner, repo, path: reportPath });
-  const report = normalizeBugReport(json, reportPath);
-
-  const nextTitle = String(payload?.title || '').trim();
-  const nextDescription = String(payload?.description || '').trim();
-  if (!nextTitle || !nextDescription) {
-    throw new Error('Title and description are required.');
-  }
-
-  report.title = nextTitle;
-  report.description = nextDescription;
-
-  await writeRepoJsonFile({
-    owner,
-    repo,
-    path: reportPath,
-    json: report,
-    sha,
-    message: `chore: edit bug report ${report.id} [skip ci]`,
+  const response = await requestLocalHelper(`/api/bug-reports/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-unlocked': 'true',
+    },
+    body: JSON.stringify({
+      title: payload?.title || '',
+      description: payload?.description || '',
+    }),
   });
-
-  return report;
+  return response.item;
 });
 
 ipcMain.handle('app:getPublicConfig', async () => ({
   licenseApiBaseUrl: LICENSE_API_BASE_URL,
-  backendRepo: `${BACKEND_REPO_OWNER}/${BACKEND_REPO_NAME}`,
   pricingPageUrl: PRICING_PAGE_URL,
-  bugReportsPath: BUG_REPORTS_PATH,
+  storageBucket: AWS_S3_BUCKET,
 }));

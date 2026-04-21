@@ -10,8 +10,6 @@
     "build": "vite build && electron-builder"
   },
   "dependencies": {
-    "@octokit/auth-app": "^7.1.2",
-    "@octokit/rest": "^20.1.1",
     "electron-store": "^8.2.0",
     "keytar": "^7.9.0"
   },

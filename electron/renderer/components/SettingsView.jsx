@@ -93,8 +93,8 @@ export default function SettingsView({ onStatus, licenseSession }) {
         <p className="card__title">Managed Backend</p>
         <div className="settings-form">
           <div className="form-field">
-            <label>Repository</label>
-            <input type="text" readOnly value={appConfig?.backendRepo || 'Not configured'} />
+            <label>S3 Bucket</label>
+            <input type="text" readOnly value={appConfig?.storageBucket || 'Not configured'} />
           </div>
           <div className="form-field">
             <label>License API</label>
@@ -107,9 +107,8 @@ export default function SettingsView({ onStatus, licenseSession }) {
       <div className="card">
         <p className="card__title">Target Languages</p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
-          Select which languages the translation pipeline should produce.
-          These values are read by <code>scripts/translate-docs.js</code> via the{' '}
-          <code>TARGET_LANGUAGES</code> workflow environment variable.
+          Select which languages the local Express translation helper should produce.
+          Upload requests will fan out to each selected language and store outputs in S3.
         </p>
         <div className="lang-chips">
           {ALL_LANGUAGES.map(({ code, label }) => (
@@ -139,7 +138,7 @@ export default function SettingsView({ onStatus, licenseSession }) {
             style={{ maxWidth: 160 }}
           />
           <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-            Translated output will be saved in <code>translations/third/</code>. Leave blank to
+            Translated output will be saved under your configured custom language code in S3. Leave blank to
             disable the custom language slot.
           </small>
         </div>
@@ -165,8 +164,8 @@ export default function SettingsView({ onStatus, licenseSession }) {
       <div className="card">
         <p className="card__title">Security Model</p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-          End users do not provide GitHub tokens, repository settings, or Azure secrets. This desktop
-          app uses developer-managed infrastructure through GitHub App authentication.
+          End users do not provide AWS credentials or Azure secrets. This desktop
+          app uses developer-managed infrastructure through the local Express helper.
         </p>
         <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           License sessions are stored in OS credential storage and periodically revalidated.

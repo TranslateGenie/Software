@@ -10,8 +10,8 @@ The only software you need for going from one language to another seamlessly. Tr
 4. Go to the download page and install the desktop app.
 5. Launch the app. It starts a local Express helper service automatically.
 6. Enter your license key on first launch. The app validates and caches it securely for future launches.
-7. Open the Upload view and drag in a document (PDF, DOCX, PPTX, or XLSX).
-8. Click Upload. The app sends files to the incoming queue and triggers translation workflow processing.
+7. Open the Upload view and drag in a document.
+8. Click Upload. The app sends files to the local Express helper, which stores assets in S3 and performs translation.
 9. Open the Translations view and refresh until your translated file appears.
 10. Download the translated file to your local machine.
 
@@ -60,12 +60,20 @@ For detailed release instructions, see [.github/RELEASE_WORKFLOW.md](.github/REL
 
 - **Website**: Static HTML/CSS deployed to GitHub Pages (no backend server)
 	- Marketing, pricing, license delivery, download pages
-- **Electron App**: Desktop application with embedded Express server
+- **Electron App**: Desktop application with embedded Express helper
 	- License activation, document upload, translation management
-- **GitHub Actions**: Automated pipelines for
-	- Website deployment
-	- Document translation processing
-	- License data signing
-	- Security checks and audits
+- **Express Helper**: Local API brain for
+	- License validation
+	- Translation orchestration
+	- Bug report handling
+	- S3 persistence
+- **AWS S3**: Primary persistence layer for
+	- Licenses (`licenses.json`)
+	- API keys (`apiks.json`)
+	- Translation input/output files and metadata
+	- Bug report records
+- **GitHub Actions**: CI/CD only
 	- Installer build and release
+	- Static site deployment
+	- Security checks and audits
 - **Square Webhooks**: License creation and updates
