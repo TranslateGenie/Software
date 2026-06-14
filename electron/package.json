@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9",
     "keytar": "^7.9.0"
   },
   "devDependencies": {
@@ -35,9 +36,15 @@
     "files": [
       "main.js",
       "preload.js",
+      ".env",
       "renderer/dist/**",
       "node_modules/**"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "TranslateGenie",
+      "repo": "Software"
+    },
     "extraResources": [
       {
         "from": "../backend",

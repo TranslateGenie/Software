@@ -8,12 +8,13 @@ import HomeView from './views/HomeView.jsx';
 import LicenseView from './views/LicenseView.jsx';
 import UploadView from './views/UploadView.jsx';
 import TranslationsView from './views/TranslationsView.jsx';
-import SettingsView from './views/SettingsView.jsx';
 import LicenseManagementView from './views/LicenseManagementView.jsx';
 import BugReportsView from './views/BugReportsView.jsx';
+import SiteView from './views/SiteView.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import LogoImg from '../Logo.png';
 
-const VIEWS = ['Upload', 'Translations', 'License', 'Bug Reports', 'Settings'];
+const VIEWS = ['News', 'Upload', 'Translations', 'License', 'Bug Reports'];
 
 function buildLicenseAlerts(session) {
   if (!session?.valid) {
@@ -45,13 +46,24 @@ function buildLicenseAlerts(session) {
 }
 
 export default function App() {
-  const [activeView, setActiveView] = useState('Upload');
+  const [activeView, setActiveView] = useState('News');
   const [statusMessage, setStatusMessage] = useState('Ready');
   const [statusLevel, setStatusLevel] = useState('ok'); // 'ok' | 'warn' | 'error'
   const [licenseSession, setLicenseSession] = useState({ valid: false });
   const [checkingLicense, setCheckingLicense] = useState(true);
   const [alerts, setAlerts] = useState([]);
   const [isEnteringLicense, setIsEnteringLicense] = useState(false);
+  const [updateState, setUpdateState] = useState({ status: 'idle', percent: 0 });
+
+  useEffect(() => {
+    window.mdas.onUpdateStatus((data) => {
+      setUpdateState(data);
+      if (data.status === 'up-to-date' || data.status === 'error') {
+        setTimeout(() => setUpdateState({ status: 'idle', percent: 0 }), 4000);
+      }
+    });
+    return () => window.mdas.removeUpdateStatusListener();
+  }, []);
 
   useEffect(() => {
     window.mdas
@@ -131,7 +143,7 @@ export default function App() {
     <div className="app">
       {/* ── Header / Navigation ─────────────────────────────────────── */}
       <header className="app__header">
-        <span className="app__logo">Translate Genie</span>
+        <span><img className="logoImg" src={LogoImg}/></span>
         <nav className="app__nav">
           {availableViews.map((view) => (
             <button
@@ -142,6 +154,22 @@ export default function App() {
               {view}
             </button>
           ))}
+          <button
+            className="nav-btn nav-btn--update"
+            disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
+            onClick={() => updateState.status === 'ready'
+              ? window.mdas.installUpdate()
+              : window.mdas.checkForUpdates()
+            }
+          >
+            {updateState.status === 'idle'      && 'Check Updates'}
+            {updateState.status === 'checking'  && 'Checking…'}
+            {updateState.status === 'up-to-date'&& 'Up to Date ✓'}
+            {updateState.status === 'available' && 'Downloading…'}
+            {updateState.status === 'downloading'&& `Downloading… ${updateState.percent}%`}
+            {updateState.status === 'ready'     && 'Restart to Install'}
+            {updateState.status === 'error'     && 'Update Failed'}
+          </button>
         </nav>
       </header>
 
@@ -156,6 +184,7 @@ export default function App() {
             ))}
           </div>
         )}
+        {activeView === 'News' && <SiteView />}
         {activeView === 'Upload' && (
           <UploadView
             onStatus={updateStatus}
@@ -172,7 +201,6 @@ export default function App() {
           />
         )}
         {activeView === 'Bug Reports' && <BugReportsView onStatus={updateStatus} />}
-        {activeView === 'Settings' && <SettingsView onStatus={updateStatus} licenseSession={licenseSession} />}
       </main>
 
       {/* ── Status bar ──────────────────────────────────────────────── */}

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('mdas', {
   writeFile: (filePath, base64Data) => ipcRenderer.invoke('fs:writeFile', filePath, base64Data),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
   openPricingPage: () => ipcRenderer.invoke('app:openPricingPage'),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   // ── Translation APIs ──────────────────────────────────────────────────────
   uploadFile: (payload) => ipcRenderer.invoke('translation:uploadFile', payload),
@@ -50,4 +51,10 @@ contextBridge.exposeInMainWorld('mdas', {
 
   // ── Metadata ──────────────────────────────────────────────────────────────
   getPublicConfig: () => ipcRenderer.invoke('app:getPublicConfig'),
+
+  // ── Updates ───────────────────────────────────────────────────────────────
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+  onUpdateStatus: (callback) => ipcRenderer.on('app:updateStatus', (_e, data) => callback(data)),
+  removeUpdateStatusListener: () => ipcRenderer.removeAllListeners('app:updateStatus'),
 });

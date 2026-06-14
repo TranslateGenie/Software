@@ -5,10 +5,28 @@
 import React from 'react';
 
 const FILE_ICONS = {
-  docx: '📝',
-  pptx: '📊',
-  xlsx: '📈',
-  pdf: '📄',
+  // Office / binary
+  docx: '📝', pptx: '📊', xlsx: '📈', pdf: '📄',
+  // Web / markup
+  html: '🌐', htm: '🌐', xml: '🗂️', svg: '🎨', xhtml: '🌐',
+  // Styles
+  css: '🎨', scss: '🎨', sass: '🎨', less: '🎨',
+  // JavaScript / TypeScript
+  js: '⚡', ts: '⚡', jsx: '⚡', tsx: '⚡', vue: '⚡', svelte: '⚡',
+  // Other code
+  py: '🐍', rb: '💎', php: '🐘', java: '☕', cs: '⚙️',
+  go: '⚙️', rs: '⚙️', swift: '⚙️', kt: '⚙️', kts: '⚙️',
+  c: '⚙️', cpp: '⚙️', h: '⚙️', hpp: '⚙️',
+  sh: '⚙️', bash: '⚙️', zsh: '⚙️', ps1: '⚙️',
+  lua: '⚙️', pl: '⚙️', r: '⚙️', scala: '⚙️', dart: '⚙️',
+  sql: '🗄️',
+  // Data / config
+  json: '📋', yaml: '📋', yml: '📋', toml: '📋',
+  ini: '📋', cfg: '📋', conf: '📋', env: '📋',
+  csv: '📊', tsv: '📊',
+  // Documents
+  md: '📝', mdx: '📝', markdown: '📝', rst: '📝', tex: '📄', rtf: '📄',
+  txt: '📄', log: '📄',
 };
 
 function getIcon(fileName) {

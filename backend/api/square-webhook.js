@@ -1,4 +1,4 @@
-import { loadLicenses, saveLicenses, loadApiKeys, parseApiKeysSchema } from '../lib/s3-data.js';
+import { loadLicenses, saveLicenses } from '../lib/storage.js';
 
 const PACK_INCREMENTS = {
   starter: { requests: 100, characters: 2000000 },
@@ -37,12 +37,6 @@ export async function squareWebhookHandler(req, res) {
   }
 
   try {
-    const { json: apiKeysJson } = await loadApiKeys();
-    const { squareKeys } = parseApiKeysSchema(apiKeysJson);
-    if (squareKeys.length === 0) {
-      return res.status(500).json({ ok: false, error: 'No Square keys configured in apiks.json' });
-    }
-
     const { json: licenses, etag } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });

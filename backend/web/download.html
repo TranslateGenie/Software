@@ -3,25 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Download Installer</title>
+  <title>Download — Translate Genie</title>
   <link rel="icon" type="image/png" href="Mascot.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+  <nav class="nav">
+    <img src="Mascot.png" alt="Translate Genie" class="nav-logo" />
+    <a href="index.html">Home</a>
+    <a href="pricing.html">Pricing</a>
+    <a href="download.html">Download</a>
+    <a href="news.html">News</a>
+  </nav>
+
   <main>
-    <div class="nav">
-      <img src="Mascot.png" alt="Translate Genie Logo" style="height: 40px; margin-right: -1rem; margin-top: -0.75rem;" />
-      <a href="index.html">Home</a>
-      <a href="pricing.html">Pricing</a>
-    </div>
-    <section class="card">
-      <h1>Download Translate Genie Installer</h1>
-      <p>Use your issued license key at first launch to activate your desktop app.</p>
-      <a class="btn" href="https://github.com/TranslateGenie/Software/releases/download/v1.0.1/MDAS.Setup.1.0.0.exe">Get Installer Here</a>
-      <div>
-        <img src="Logo.png" alt="Pricing Tiers" style="width: 50%; margin-top: 1rem; margin-left: 25%;" />
+
+    <section class="card hero-card">
+      <img src="Logo2.png" alt="Translate Genie" class="hero-logo" />
+      <h3 class="hero-title">Download Translate Genie</h3>
+      <p class="hero-desc">
+        Now distributed through GitHub Releases — verified builds, full release history,
+        and a transparent install process you can trust.
+      </p>
+      <div class="hero-actions">
+        <a class="btn" href="https://github.com/TranslateGenie/Software/releases/latest" target="_blank" rel="noopener">
+          Download Latest Release
+        </a>
+        <a class="btn btn--secondary" href="https://github.com/TranslateGenie/Software/releases" target="_blank" rel="noopener">
+          View All Releases
+        </a>
+      </div>
+      <p class="hero-fine-print">
+        Windows installer (.exe). After installing, launch the app and enter your license key to activate.
+        No account required. We collect no machine data.
+      </p>
+    </section>
+
+    <section class="section-block">
+      <h2 class="section-title">Why GitHub Releases?</h2>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon">&#10003;</div>
+          <h3 class="feature-title">Verified Builds</h3>
+          <p class="feature-desc">
+            Every release is built from a tagged commit in our public repository. You can inspect
+            exactly what went into the installer before you download it.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128274;</div>
+          <h3 class="feature-title">Checksum Validation</h3>
+          <p class="feature-desc">
+            SHA-256 checksums are published alongside every release so you can verify the installer
+            has not been tampered with before running it.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128203;</div>
+          <h3 class="feature-title">Full Release History</h3>
+          <p class="feature-desc">
+            Every version we have ever shipped is archived on GitHub. Roll back to a previous
+            release or audit the changelog at any time.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128276;</div>
+          <h3 class="feature-title">Release Notifications</h3>
+          <p class="feature-desc">
+            Watch the repository on GitHub to get notified the moment a new version ships.
+            No newsletter required.
+          </p>
+        </div>
+
       </div>
     </section>
+
+    <section class="section-block">
+      <h2 class="section-title">Installation Guide</h2>
+      <div class="card">
+        <ol style="padding-left: 20px; display: flex; flex-direction: column; gap: 12px; color: var(--text-muted); font-size: 14px;">
+          <li>Click <strong>Download Latest Release</strong> above and download the <code>.exe</code> installer from the GitHub release page.</li>
+          <li>Optionally verify the SHA-256 checksum listed on the release page against the downloaded file.</li>
+          <li>Run the installer. Windows may show a SmartScreen prompt — click <strong>More info → Run anyway</strong>. This is expected for a new publisher certificate.</li>
+          <li>Launch <strong>Translate Genie</strong> from your Start Menu or Desktop.</li>
+          <li>Enter your license key when prompted to activate the app.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section-block">
+      <h2 class="section-title">System Requirements</h2>
+      <div class="card">
+        <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--text-muted); font-size: 14px;">
+          <li>Windows 10 or Windows 11 (64-bit)</li>
+          <li>~200 MB disk space</li>
+          <li>Internet connection required for translation (Azure AI Translator)</li>
+          <li>A valid Translate Genie license key — <a class="href" href="pricing.html">purchase one here</a></li>
+        </ul>
+      </div>
+    </section>
+
   </main>
+
 </body>
 </html>

@@ -8,3 +8,4 @@ build/
 electron/dist/
 electron/build/
 electron/node_modules/
+backend/dev-storage/

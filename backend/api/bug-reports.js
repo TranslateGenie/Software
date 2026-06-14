@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { listBugReports, getBugReportById, saveBugReport } from '../lib/s3-data.js';
+import { listBugReports, getBugReportById, saveBugReport } from '../lib/storage.js';
 
 function normalizeBugReport(report) {
   return {

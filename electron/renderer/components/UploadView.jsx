@@ -6,6 +6,7 @@
 import React, { useState, useCallback } from 'react';
 import DropZone from './DropZone.jsx';
 import FileList from './FileList.jsx';
+import { AZURE_LANGUAGES } from '../lib/azureLanguages.js';
 
 let nextId = 1;
 
@@ -14,7 +15,6 @@ async function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      // reader.result is a data-URL like "data:...;base64,<data>"
       const base64 = reader.result.split(',')[1];
       resolve(base64);
     };
@@ -27,6 +27,9 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
   const [files, setFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [progress, setProgress] = useState({ completed: 0, total: 0 });
+  const [fromLang, setFromLang] = useState('');       // '' = auto-detect
+  const [toLang, setToLang] = useState('en');
 
   const limit = Number(licenseSession?.limit ?? 0);
   const requests = Number(licenseSession?.requests ?? 0);
@@ -59,19 +62,14 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
     let effectiveSession = licenseSession;
     try {
       const refreshed = await window.mdas.refreshLicenseSession();
-      if (onLicenseSessionUpdated) {
-        onLicenseSessionUpdated(refreshed);
-      }
+      if (onLicenseSessionUpdated) onLicenseSessionUpdated(refreshed);
       effectiveSession = refreshed;
     } catch {
-      // Ignore refresh errors here; existing session values are used as fallback.
+      // Use existing session as fallback.
     }
 
     if (!effectiveSession?.valid) {
-      setAlert({
-        type: 'error',
-        text: 'License is missing or invalid. Activate or renew your license before uploading.',
-      });
+      setAlert({ type: 'error', text: 'License is missing or invalid. Activate or renew your license before uploading.' });
       onStatus('Upload blocked: invalid license', 'error');
       return;
     }
@@ -85,19 +83,16 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
     const refreshedQuotaReached = refreshedRemainingRequests <= 0 || refreshedRemainingCharacters <= 0;
 
     if (refreshedQuotaReached || quotaReached) {
-      setAlert({
-        type: 'error',
-        text: 'Your translation quota has been reached. Please purchase additional request packs.',
-      });
+      setAlert({ type: 'error', text: 'Your translation quota has been reached. Please purchase additional request packs.' });
       onStatus('Upload blocked: quota reached', 'error');
       return;
     }
 
-    if ((refreshedLimit > 0 && refreshedRemainingRequests / refreshedLimit < 0.1) || (refreshedCharLimit > 0 && refreshedRemainingCharacters / refreshedCharLimit < 0.1)) {
-      setAlert({
-        type: 'warn',
-        text: 'Your license is nearing its limits. Renew soon to avoid interruptions.',
-      });
+    if (
+      (refreshedLimit > 0 && refreshedRemainingRequests / refreshedLimit < 0.1) ||
+      (refreshedCharLimit > 0 && refreshedRemainingCharacters / refreshedCharLimit < 0.1)
+    ) {
+      setAlert({ type: 'warn', text: 'Your license is nearing its limits. Renew soon to avoid interruptions.' });
       onStatus('License nearing limits', 'warn');
     }
 
@@ -106,6 +101,7 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
 
     setIsUploading(true);
     setAlert(null);
+    setProgress({ completed: 0, total: pending.length });
     onStatus('Uploading…', 'warn');
 
     let successCount = 0;
@@ -119,6 +115,8 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
           fileName: entry.file.name,
           base64Content,
           mimeType: entry.file.type || 'application/octet-stream',
+          targetLanguage: toLang,
+          fromLanguage: fromLang || undefined,
         });
         updateEntry(entry.id, { status: 'uploaded' });
         successCount++;
@@ -126,9 +124,11 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
         updateEntry(entry.id, { status: 'error', error: err.message });
         errorCount++;
       }
+      setProgress((prev) => ({ ...prev, completed: prev.completed + 1 }));
     }
 
     setIsUploading(false);
+    setProgress({ completed: 0, total: 0 });
 
     if (errorCount === 0) {
       setAlert({ type: 'success', text: `${successCount} file(s) uploaded and translated successfully.` });
@@ -145,21 +145,20 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
 
   const pendingCount = files.filter((e) => e.status === 'pending').length;
   const hasDone = files.some((e) => e.status === 'uploaded' || e.status === 'error');
+  const progressPct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
 
   return (
     <div>
       {alert && (
-        <div className={`alert alert--${alert.type}`}>
-          {alert.text}
-        </div>
+        <div className={`alert alert--${alert.type}`}>{alert.text}</div>
       )}
 
       <div className="card">
         <p className="card__title">First Translation Checklist</p>
         <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <li>Confirm your license is active and quotas are available.</li>
-          <li>Drop a document below and click <strong>Upload</strong>.</li>
-          <li>Wait for local helper processing to complete.</li>
+          <li>Select the source and target languages below.</li>
+          <li>Drop a document and click <strong>Upload</strong>.</li>
           <li>Go to <strong>Translations</strong> and download your translated result.</li>
         </ol>
       </div>
@@ -173,13 +172,46 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
             Your translation quota has been reached. Please purchase additional request packs.
           </div>
         )}
+
+        {/* ── Language selectors ───────────────────────────────────────── */}
+        <div className="lang-row">
+          <div className="lang-field">
+            <span className="lang-label">From</span>
+            <select
+              className="lang-select"
+              value={fromLang}
+              onChange={(e) => setFromLang(e.target.value)}
+            >
+              <option value="">Auto-detect</option>
+              {AZURE_LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <span className="lang-arrow">→</span>
+
+          <div className="lang-field">
+            <span className="lang-label">To</span>
+            <select
+              className="lang-select"
+              value={toLang}
+              onChange={(e) => setToLang(e.target.value)}
+            >
+              {AZURE_LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <p className="card__title">Drop Documents</p>
         <DropZone onFilesAdded={handleFilesAdded} />
       </div>
 
       {files.length > 0 && (
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isUploading ? 8 : 16 }}>
             <p className="card__title" style={{ marginBottom: 0 }}>Queue ({files.length})</p>
             <div style={{ display: 'flex', gap: 8 }}>
               {hasDone && (
@@ -200,6 +232,18 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
               </button>
             </div>
           </div>
+
+          {isUploading && progress.total > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="progress-wrap">
+                <div className="progress-bar" style={{ width: `${progressPct}%` }} />
+              </div>
+              <p className="progress-label">
+                {progress.completed} of {progress.total} file{progress.total !== 1 ? 's' : ''} translated
+              </p>
+            </div>
+          )}
+
           <FileList files={files} onRemove={handleRemove} />
         </div>
       )}
@@ -207,9 +251,9 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
       <div className="card">
         <p className="card__title">How it works</p>
         <ol style={{ paddingLeft: 20, color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <li>Drop your DOCX, PPTX, XLSX, or PDF documents above.</li>
+          <li>Drop any supported document, code, or data file above.</li>
           <li>Click <strong>Upload</strong> — files are sent securely to the managed translation backend.</li>
-          <li>The local Express helper translates them and stores results in S3.</li>
+          <li>The local Express helper translates them and stores results locally on your device.</li>
           <li>Switch to <strong>Translations</strong> to download the results when they are ready.</li>
         </ol>
       </div>

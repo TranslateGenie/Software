@@ -3,34 +3,458 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Translate Genie SaaS</title>
+  <title>Translate Genie</title>
   <link rel="icon" type="image/png" href="Mascot.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+  <nav class="nav">
+    <img src="Mascot.png" alt="Translate Genie" class="nav-logo" />
+    <a href="index.html">Home</a>
+    <a href="pricing.html">Pricing</a>
+    <a href="download.html">Download</a>
+    <a href="news.html">News</a>
+  </nav>
+
   <main>
-    <div class="nav">
-      <img src="Mascot.png" alt="Translate Genie Logo" style="height: 40px; margin-right: -1rem; margin-top: -0.75rem;" />
-      <a href="index.html">Home</a>
-      <a href="pricing.html">Pricing</a>
-      <a href="download.html">Download</a>
-    </div>
-    <section class="card">
-      <img src="Logo2.png" alt="Pricing Tiers" style="width: 10%;" />
-      <h3 style="text-align: center; margin-top: -2rem;">Document Language Translation Made Easy</h3>
-      <p> The only software you need for going from one language to another seamlessly. Translate office documents with zero infrastructure setup. Upload from desktop, download a few moments later. It really is THAT easy! Completely private and secure, empowered entirely with Azure AI. Simply purchase a license, download the desktop app, and start translating your documents today. No more copy-pasting or manual translation work. Translate Genie is your one-stop solution for all your document translation needs. With multiple pricing tiers to choose from, you can select the plan that best fits your organization's needs.
+
+    <!-- ── Hero ── -->
+    <section class="card hero-card">
+      <img src="Logo2.png" alt="Translate Genie" class="hero-logo" />
+      <h3 class="hero-title">Document Language Translation Made Easy</h3>
+      <p class="hero-desc">
+        The only software you need for going from one language to another seamlessly. Translate office
+        documents with zero infrastructure setup. Upload from desktop, download a few moments later.
+        Completely private and secure, empowered entirely with Azure AI. Simply purchase a license,
+        download the desktop app, and start translating today.
       </p>
-      <a class="btn" href="pricing.html">View Pricing</a>
-      <a class="btn" href="download.html">Download</a>
-      <p style="margin-top: -3rem; font-size: 0.7rem; color: #555; text-align: left; width: 60%; margin-left: 30%;">
-          Please note that Translate Genie is a desktop application that requires installation on your local machine. After purchasing a license, you will 
-          receive a license key that can be used to activate the software. We do not collect any machine information. Document Types are limited to .pdf, 
-          .docx, .pptx, and .xlsx formats. For any questions or support, please use the help link to leave a bug report for the developers.
+      <div class="hero-actions">
+        <a class="btn" href="pricing.html">View Pricing</a>
+        <a class="btn" href="download.html">Download</a>
+      </div>
+      <p class="hero-fine-print">
+        Translate Genie is a desktop application requiring local installation. After purchasing a license you
+        will receive a license key for activation. We collect no machine data. Supported formats: DOCX, PPTX,
+        XLSX, PDF, HTML, CSS, JS, TS, MD, TXT, CSV, YAML, and many more. For support, use the in-app help link to submit a bug report.
       </p>
-      <div style="margin-top: -2rem;">
-        <img src="Logo.png" alt="Pricing Tiers" style="width: 50%; margin-left: 25%;" />
+      <img src="Logo.png" alt="App screenshot" class="hero-preview" />
+    </section>
+
+    <!-- ── Customer Reviews: overview + carousel ── -->
+    <section class="section-block" id="reviews">
+      <h2 class="section-title">Customer Reviews</h2>
+
+      <div class="reviews-overview">
+        <div class="rating-summary">
+          <div class="big-rating" id="avgRating">—</div>
+          <div class="big-stars" id="avgStars"></div>
+          <div class="rating-count" id="ratingCount"></div>
+          <div class="rating-bars" id="ratingBars"></div>
+        </div>
+        <div class="ai-overview">
+          <div class="ai-badge">&#10022; AI Overview</div>
+          <p class="ai-text" id="aiOverview"></p>
+        </div>
+      </div>
+
+      <!-- Top Reviews — 3-column grid carousel -->
+      <div class="carousel-section">
+        <p class="carousel-title">Top Reviews</p>
+        <div class="carousel-wrapper">
+          <button class="carousel-btn" id="carouselPrev">&#8249;</button>
+          <div class="carousel-track" id="carouselTrack"></div>
+          <button class="carousel-btn" id="carouselNext">&#8250;</button>
+        </div>
+        <div class="carousel-dots" id="carouselDots"></div>
       </div>
     </section>
+
+    <!-- ── All Reviews — Amazon-style list with pagination ── -->
+    <section class="section-block" id="allReviewsSection">
+
+      <div class="reviews-header">
+        <input type="text" class="search-bar" id="reviewSearch" placeholder="Search reviews&#8230;" />
+        <button class="filter-toggle-btn" id="filterToggle">Filters</button>
+      </div>
+
+      <div class="filters-panel" id="filtersPanel" style="display:none;">
+        <label>
+          Rating
+          <select id="filterRating">
+            <option value="">All Ratings</option>
+            <option value="5">5 Stars</option>
+            <option value="4">4 Stars</option>
+            <option value="3">3 Stars</option>
+            <option value="2">2 Stars</option>
+            <option value="1">1 Star</option>
+          </select>
+        </label>
+        <label>
+          Sort By
+          <select id="filterSort">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="highest">Highest Rating</option>
+            <option value="lowest">Lowest Rating</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="reviews-list" id="reviewsList"></div>
+      <div class="pagination" id="pagination"></div>
+
+    </section>
+
+    <!-- ── Leave a Review ── -->
+    <section class="section-block leave-review-section">
+      <button class="leave-review-toggle" id="leaveReviewToggle">+ Leave a Review</button>
+      <div class="leave-review-form" id="leaveReviewForm" style="display:none;">
+        <div class="review-form-row">
+          <label class="review-form-label">
+            First Name
+            <input type="text" id="reviewFirstName" placeholder="Jane" maxlength="50" />
+          </label>
+          <label class="review-form-label">
+            Last Initial
+            <input type="text" id="reviewLastInitial" placeholder="D" maxlength="1" />
+          </label>
+          <label class="review-form-label">
+            Date
+            <input type="text" id="reviewDate" readonly />
+          </label>
+        </div>
+        <div class="star-picker" id="starPicker"></div>
+        <textarea class="review-textarea" id="reviewText" placeholder="Share your experience with Translate Genie&#8230;"></textarea>
+        <button class="btn" id="submitReview">Submit Review</button>
+        <p class="review-success" id="reviewSuccess" style="display:none;">&#10003; Thank you! Your review has been submitted.</p>
+      </div>
+    </section>
+
   </main>
+
+  <script>
+    // ── Config ───────────────────────────────────────────────────────────────
+    // Dev (localhost): served by local Express. Prod (GitHub Pages): fetched from S3.
+    // Replace the S3 URL below with your actual bucket once it's live.
+    // To wire up a REST API later, replace DATA_URL with the endpoint and swap
+    // loadData() for a fetch call with queryReviews() params as query-string args.
+    const DATA_URL = './reviews.json';
+    const PER_PAGE       = 10;
+    const CAROUSEL_TOTAL = 9;   // top reviews in the carousel (3 pages × 3 cards)
+    const CAROUSEL_PAGE  = 3;   // cards visible per carousel page
+
+    const AVATAR_COLORS = [
+      '#5865f2','#eb459e','#3ba55c','#faa61a',
+      '#ed4245','#9b59b6','#1abc9c','#e67e22','#3498db','#e74c3c'
+    ];
+
+    // ── State ────────────────────────────────────────────────────────────────
+    let allReviews   = [];
+    let carouselPage = 0;
+    let currentPage  = 1;
+
+    // ── Data layer ───────────────────────────────────────────────────────────
+    async function loadData() {
+      const res = await fetch(DATA_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status} loading ${DATA_URL}`);
+      const raw = await res.json();
+      const overview = raw.find(o => 'aiOverview' in o)?.aiOverview ?? '';
+      const reviews  = raw.filter(o => 'id' in o);
+      return { reviews, overview };
+    }
+
+    // Mirrors a future REST API contract:
+    //   GET /api/reviews?search=&rating=&sort=newest&page=1&perPage=10
+    // When wired to a real endpoint, replace the filtering/sorting below
+    // with a single fetch call and return its JSON directly.
+    function queryReviews(reviews, {
+      search  = '',
+      rating  = '',
+      sort    = 'newest',
+      page    = 1,
+      perPage = PER_PAGE
+    } = {}) {
+      let results = [...reviews];
+
+      if (search) {
+        const q = search.toLowerCase();
+        results = results.filter(r =>
+          r.body.toLowerCase().includes(q) ||
+          r.firstName.toLowerCase().includes(q) ||
+          r.lastInitial.toLowerCase().includes(q)
+        );
+      }
+      if (rating) results = results.filter(r => r.rating === +rating);
+
+      switch (sort) {
+        case 'oldest':  results.sort((a, b) => new Date(a.date) - new Date(b.date)); break;
+        case 'highest': results.sort((a, b) => b.rating - a.rating);                 break;
+        case 'lowest':  results.sort((a, b) => a.rating - b.rating);                 break;
+        default:        results.sort((a, b) => new Date(b.date) - new Date(a.date));
+      }
+
+      const total   = results.length;
+      const pages   = Math.max(1, Math.ceil(total / perPage));
+      const safePage = Math.min(Math.max(page, 1), pages);
+      const data    = results.slice((safePage - 1) * perPage, safePage * perPage);
+      return { data, total, page: safePage, pages, perPage };
+    }
+
+    // ── Utilities ────────────────────────────────────────────────────────────
+    function avatarColor(initials) {
+      const h = initials.charCodeAt(0) + (initials.charCodeAt(1) || 0);
+      return AVATAR_COLORS[h % AVATAR_COLORS.length];
+    }
+
+    function renderStars(rating) {
+      return [1,2,3,4,5].map(i =>
+        `<span class="star${i <= rating ? ' filled' : ''}">&#9733;</span>`
+      ).join('');
+    }
+
+    function formatDate(d) {
+      return new Date(d + 'T00:00:00').toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric'
+      });
+    }
+
+    function computeStats(reviews) {
+      const total = reviews.length;
+      const avg   = total ? reviews.reduce((s, r) => s + r.rating, 0) / total : 0;
+      const breakdown = [5,4,3,2,1].map(n => {
+        const count = reviews.filter(r => r.rating === n).length;
+        return { n, count, pct: total ? Math.round(count / total * 100) : 0 };
+      });
+      return { total, avg, breakdown };
+    }
+
+    // ── Render helpers ───────────────────────────────────────────────────────
+    function renderCarouselCard(r) {
+      const initials = r.firstName[0] + r.lastInitial;
+      return `
+        <div class="review-card">
+          <div class="review-card-header">
+            <div class="avatar" style="background:${avatarColor(initials)}">${initials}</div>
+            <div class="reviewer-info">
+              <div class="reviewer-name">${r.firstName} ${r.lastInitial}.</div>
+              <div class="review-date">${formatDate(r.date)}</div>
+            </div>
+            <div class="review-rating">${renderStars(r.rating)}</div>
+          </div>
+          <p class="review-body">${r.body}</p>
+        </div>`;
+    }
+
+    function renderReviewItem(r) {
+      const initials = r.firstName[0] + r.lastInitial;
+      return `
+        <div class="review-item">
+          <div class="review-item-author">
+            <div class="avatar" style="background:${avatarColor(initials)}">${initials}</div>
+            <span class="reviewer-name">${r.firstName} ${r.lastInitial}.</span>
+          </div>
+          <div class="review-item-rating">${renderStars(r.rating)}</div>
+          <p class="review-item-date">Reviewed on ${formatDate(r.date)}</p>
+          <p class="review-item-body">${r.body}</p>
+        </div>`;
+    }
+
+    // ── Pagination ───────────────────────────────────────────────────────────
+    function pageRange(page, pages) {
+      const set = new Set([1, pages]);
+      for (let i = Math.max(1, page - 2); i <= Math.min(pages, page + 2); i++) set.add(i);
+      const sorted = [...set].sort((a, b) => a - b);
+      const out = [];
+      let prev = 0;
+      for (const n of sorted) {
+        if (n - prev > 1) out.push('…');
+        out.push(n);
+        prev = n;
+      }
+      return out;
+    }
+
+    function renderPagination(total, page, pages) {
+      const el = document.getElementById('pagination');
+      if (pages <= 1) { el.innerHTML = ''; return; }
+
+      el.innerHTML = `
+        <button class="page-btn" id="pagePrev"${page === 1 ? ' disabled' : ''}>&lsaquo; Prev</button>
+        ${pageRange(page, pages).map(p =>
+          typeof p === 'number'
+            ? `<button class="page-btn page-num${p === page ? ' active' : ''}" data-page="${p}">${p}</button>`
+            : `<span class="page-ellipsis">&#8230;</span>`
+        ).join('')}
+        <button class="page-btn" id="pageNext"${page === pages ? ' disabled' : ''}>Next &rsaquo;</button>`;
+
+      el.querySelector('#pagePrev').addEventListener('click', () => goToPage(page - 1));
+      el.querySelector('#pageNext').addEventListener('click', () => goToPage(page + 1));
+      el.querySelectorAll('.page-num').forEach(btn =>
+        btn.addEventListener('click', () => goToPage(+btn.dataset.page))
+      );
+    }
+
+    // ── Review list refresh ──────────────────────────────────────────────────
+    function getParams() {
+      return {
+        search:  document.getElementById('reviewSearch').value,
+        rating:  document.getElementById('filterRating').value,
+        sort:    document.getElementById('filterSort').value,
+        page:    currentPage,
+        perPage: PER_PAGE,
+      };
+    }
+
+    function refreshReviews() {
+      const result = queryReviews(allReviews, getParams());
+      document.getElementById('reviewsList').innerHTML = result.total
+        ? result.data.map(renderReviewItem).join('')
+        : '<p class="no-results">No reviews match your search.</p>';
+      renderPagination(result.total, result.page, result.pages);
+    }
+
+    function goToPage(n) {
+      currentPage = n;
+      refreshReviews();
+      document.getElementById('allReviewsSection')
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ── Carousel ─────────────────────────────────────────────────────────────
+    function renderCarousel(topReviews) {
+      const pages = Math.ceil(topReviews.length / CAROUSEL_PAGE);
+      const start = carouselPage * CAROUSEL_PAGE;
+      document.getElementById('carouselTrack').innerHTML =
+        topReviews.slice(start, start + CAROUSEL_PAGE).map(renderCarouselCard).join('');
+
+      document.getElementById('carouselDots').innerHTML =
+        Array.from({ length: pages }, (_, i) =>
+          `<span class="dot${i === carouselPage ? ' active' : ''}" data-i="${i}"></span>`
+        ).join('');
+
+      document.querySelectorAll('.dot').forEach(d =>
+        d.addEventListener('click', () => { carouselPage = +d.dataset.i; renderCarousel(topReviews); })
+      );
+
+      document.getElementById('carouselPrev').onclick = () => {
+        carouselPage = (carouselPage - 1 + pages) % pages;
+        renderCarousel(topReviews);
+      };
+      document.getElementById('carouselNext').onclick = () => {
+        carouselPage = (carouselPage + 1) % pages;
+        renderCarousel(topReviews);
+      };
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', async () => {
+
+      let data;
+      try {
+        data = await loadData();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('reviewsList').innerHTML =
+          '<p class="no-results">Could not load reviews — please try again later.</p>';
+        return;
+      }
+
+      allReviews = data.reviews;
+
+      // Stats
+      const stats = computeStats(allReviews);
+      document.getElementById('avgRating').textContent    = stats.avg.toFixed(1);
+      document.getElementById('avgStars').innerHTML       = renderStars(Math.round(stats.avg));
+      document.getElementById('ratingCount').textContent  = `${stats.total} verified reviews`;
+      document.getElementById('aiOverview').textContent   = data.overview;
+      document.getElementById('ratingBars').innerHTML     = stats.breakdown.map(b => `
+        <div class="bar-row">
+          <span class="bar-label">${b.n} &#9733;</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${b.pct}%"></div></div>
+          <span class="bar-count">${b.count}</span>
+        </div>`).join('');
+
+      // Carousel — first CAROUSEL_TOTAL five-star reviews in pages of CAROUSEL_PAGE
+      const topReviews = allReviews.filter(r => r.rating === 5).slice(0, CAROUSEL_TOTAL);
+      renderCarousel(topReviews);
+
+      // Reviews list
+      refreshReviews();
+
+      // Filter events — reset to page 1 on any change
+      document.getElementById('reviewSearch').addEventListener('input', () => {
+        currentPage = 1; refreshReviews();
+      });
+      ['filterRating', 'filterSort'].forEach(id =>
+        document.getElementById(id).addEventListener('change', () => {
+          currentPage = 1; refreshReviews();
+        })
+      );
+
+      // Filter panel toggle
+      document.getElementById('filterToggle').addEventListener('click', () => {
+        const p   = document.getElementById('filtersPanel');
+        const btn = document.getElementById('filterToggle');
+        const open = p.style.display !== 'none';
+        p.style.display = open ? 'none' : 'flex';
+        btn.classList.toggle('active', !open);
+      });
+
+      // Leave a review toggle — auto-populate date on open
+      document.getElementById('leaveReviewToggle').addEventListener('click', () => {
+        const f    = document.getElementById('leaveReviewForm');
+        const open = f.style.display !== 'none';
+        f.style.display = open ? 'none' : 'block';
+        document.getElementById('leaveReviewToggle').textContent =
+          open ? '+ Leave a Review' : '− Leave a Review';
+        if (!open) {
+          document.getElementById('reviewDate').value = new Date().toLocaleDateString('en-US', {
+            year: 'numeric', month: 'long', day: 'numeric'
+          });
+        }
+      });
+
+      // Star picker
+      let selectedRating = 0;
+      document.getElementById('starPicker').innerHTML = [1,2,3,4,5].map(i =>
+        `<span class="pick-star" data-r="${i}">&#9733;</span>`
+      ).join('');
+
+      function syncPickerStars(hover) {
+        const v = hover || selectedRating;
+        document.querySelectorAll('.pick-star').forEach((s, i) =>
+          s.classList.toggle('active', i < v)
+        );
+      }
+
+      document.querySelectorAll('.pick-star').forEach(s => {
+        s.addEventListener('mouseenter', () => syncPickerStars(+s.dataset.r));
+        s.addEventListener('mouseleave', () => syncPickerStars(0));
+        s.addEventListener('click', () => { selectedRating = +s.dataset.r; syncPickerStars(0); });
+      });
+
+      // Submit review
+      document.getElementById('submitReview').addEventListener('click', () => {
+        const firstName   = document.getElementById('reviewFirstName').value.trim();
+        const lastInitial = document.getElementById('reviewLastInitial').value.trim();
+        const text        = document.getElementById('reviewText').value.trim();
+        if (!firstName || !lastInitial || !selectedRating || !text) {
+          alert('Please fill in your first name, last initial, a star rating, and your review before submitting.');
+          return;
+        }
+        const succ = document.getElementById('reviewSuccess');
+        succ.style.display = 'block';
+        document.getElementById('reviewFirstName').value   = '';
+        document.getElementById('reviewLastInitial').value = '';
+        document.getElementById('reviewText').value        = '';
+        selectedRating = 0;
+        syncPickerStars(0);
+        setTimeout(() => { succ.style.display = 'none'; }, 4000);
+      });
+
+    });
+  </script>
+
 </body>
 </html>

@@ -1,4 +1,4 @@
-import { loadLicenses, saveLicenses } from '../lib/s3-data.js';
+import { loadLicenses, saveLicenses } from '../lib/storage.js';
 
 const TIER_CONFIG = {
   T1: { userRange: '1-20', requestLimit: 500, charLimit: 10000000 },

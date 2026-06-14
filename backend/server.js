@@ -19,7 +19,7 @@ import {
   updateBugReportStatusHandler,
   updateBugReportDetailsHandler,
 } from './api/bug-reports.js';
-import { loadLicenses } from './lib/s3-data.js';
+import { loadLicenses, loadNews, loadReviews } from './lib/storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +27,19 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
+
+const ELECTRON_ORIGINS = /^http:\/\/localhost:(5173|[0-9]+)$/;
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ELECTRON_ORIGINS.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -75,6 +88,24 @@ app.post('/api/bug-reports', createBugReportHandler);
 app.post('/api/bug-reports/:id/comments', addBugReportCommentHandler);
 app.patch('/api/bug-reports/:id/status', updateBugReportStatusHandler);
 app.patch('/api/bug-reports/:id', updateBugReportDetailsHandler);
+
+app.get('/news.json', async (_req, res) => {
+  try {
+    const data = await loadNews();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/reviews.json', async (_req, res) => {
+  try {
+    const data = await loadReviews();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'index.html'));

@@ -1,4 +1,4 @@
-import { loadLicenses } from '../lib/s3-data.js';
+import { loadLicenses } from '../lib/storage.js';
 
 const TIER_DEFAULTS = {
   T1: { limit: 500, charLimit: 10000000 },

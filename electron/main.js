@@ -5,6 +5,8 @@
  */
 
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -90,6 +92,7 @@ async function startLocalHelperServer() {
       ELECTRON_RUN_AS_NODE: '1',
       HOST: LOCAL_HELPER_HOST,
       PORT: String(LOCAL_HELPER_PORT),
+      MDAS_USER_DATA_DIR: app.getPath('userData'),
     },
     stdio: 'pipe',
   });
@@ -311,13 +314,13 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    autoHideMenuBar: true,
     icon: path.join(__dirname, 'Logo.png'),
     webPreferences: {
-      // Load preload script to expose safe API surface
       preload: path.join(__dirname, 'preload.js'),
-      // Disable Node.js in renderer for security
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true,
     },
     titleBarStyle: 'hiddenInset',
     show: false,
@@ -362,7 +365,24 @@ function createWindow() {
 
 app.whenReady().then(() => {
   startLocalHelperServer()
-    .then(() => {
+    .then(async () => {
+      if (process.env.MDAS_ENV === 'dev') {
+        // Auto-inject a dev license session so no activation is needed locally.
+        // The token encodes DEV-0000-0000-0000 with a year-2100 expiry.
+        const DEV_KEY = 'DEV-0000-0000-0000';
+        const DEV_TOKEN = `mdas_${Buffer.from(`${DEV_KEY}:4102444800000`).toString('base64url')}`;
+        await saveLicenseSession({
+          token: DEV_TOKEN,
+          org: 'dev-org',
+          type: 'T2',
+          valid: true,
+          limit: 99999,
+          requests: 0,
+          charLimit: 999999999,
+          characters: 0,
+          validatedAt: Date.now(),
+        });
+      }
       createWindow();
     })
     .catch((error) => {
@@ -383,6 +403,56 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+// ─── Auto-Updater ─────────────────────────────────────────────────────────────
+
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.logger = null;
+
+function sendUpdateStatus(status, message = '', percent = 0) {
+  mainWindow?.webContents?.send('app:updateStatus', { status, message, percent });
+}
+
+autoUpdater.on('checking-for-update', () => sendUpdateStatus('checking'));
+autoUpdater.on('update-available', (info) => sendUpdateStatus('available', `v${info.version} available`));
+autoUpdater.on('update-not-available', () => sendUpdateStatus('up-to-date'));
+autoUpdater.on('download-progress', (p) => sendUpdateStatus('downloading', '', Math.round(p.percent)));
+autoUpdater.on('update-downloaded', () => sendUpdateStatus('ready'));
+autoUpdater.on('error', (err) => sendUpdateStatus('error', err.message));
+
+ipcMain.handle('app:checkForUpdates', () => {
+  if (!app.isPackaged) {
+    sendUpdateStatus('up-to-date', 'Update checks only run in packaged builds.');
+    return;
+  }
+  autoUpdater.checkForUpdates();
+});
+
+ipcMain.handle('app:installUpdate', () => {
+  autoUpdater.quitAndInstall();
+});
+
+// Open external URLs from webview in the system browser instead of Electron
+app.on('web-contents-created', (_e, contents) => {
+  if (contents.getType() === 'webview') {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (!url.startsWith(`http://localhost:${LOCAL_HELPER_PORT}`) && !url.startsWith(`http://127.0.0.1:${LOCAL_HELPER_PORT}`)) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
+    });
+
+    contents.on('will-navigate', (e, url) => {
+      if (!url.startsWith(`http://localhost:${LOCAL_HELPER_PORT}`) && !url.startsWith(`http://127.0.0.1:${LOCAL_HELPER_PORT}`)) {
+        e.preventDefault();
+        shell.openExternal(url);
+      }
+    });
+  }
+});
+
+ipcMain.handle('shell:openExternal', (_event, url) => shell.openExternal(url));
 
 // ─── Settings IPC ─────────────────────────────────────────────────────────────
 
@@ -486,48 +556,34 @@ ipcMain.handle('admin:isUnlocked', async () => ({ ok: true, unlocked: adminUnloc
  * Upload a file to the local helper translation API.
  * The renderer passes the file content as a base64 string.
  */
-ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Content, targetLanguage = 'en', mimeType = 'text/plain' }) => {
+ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Content, targetLanguage = 'en', fromLanguage = '', mimeType = 'text/plain' }) => {
   const session = await readLicenseSession();
   if (!session?.token || !session?.org) {
     throw new Error('A valid license is required before uploading documents.');
   }
 
-  const configuredLanguages = Array.isArray(store.get('targetLanguages'))
-    ? store.get('targetLanguages')
-    : [targetLanguage || 'en'];
+  const result = await requestLocalHelper('/api/translate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify({
+      fileName,
+      base64Content,
+      targetLanguage: targetLanguage || 'en',
+      fromLanguage: fromLanguage || undefined,
+      mimeType,
+    }),
+  });
 
-  const requestedLanguages = configuredLanguages
-    .map((lang) => resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase()))
-    .filter(Boolean);
-
-  const uniqueLanguages = [...new Set(requestedLanguages.length > 0 ? requestedLanguages : [targetLanguage || 'en'])];
-
-  const results = [];
-  for (const lang of uniqueLanguages) {
-    const result = await requestLocalHelper('/api/translate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.token}`,
-      },
-      body: JSON.stringify({
-        fileName,
-        base64Content,
-        targetLanguage: lang,
-        mimeType,
-      }),
-    });
-    results.push(result);
-  }
-
-  const latestResult = results[results.length - 1];
-  if (latestResult?.usage) {
+  if (result?.usage) {
     const updatedSession = {
       ...session,
-      requests: Number(latestResult.usage.requests || session.requests || 0),
-      limit: Number(latestResult.usage.limit || session.limit || 0),
-      characters: Number(latestResult.usage.characters || session.characters || 0),
-      charLimit: Number(latestResult.usage.charLimit || session.charLimit || 0),
+      requests: Number(result.usage.requests || session.requests || 0),
+      limit: Number(result.usage.limit || session.limit || 0),
+      characters: Number(result.usage.characters || session.characters || 0),
+      charLimit: Number(result.usage.charLimit || session.charLimit || 0),
       validatedAt: Date.now(),
     };
     await saveLicenseSession(updatedSession);
@@ -536,9 +592,9 @@ ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Conten
 
   return {
     ok: true,
-    ids: results.map((item) => item.translationId),
+    ids: [result.translationId],
     name: fileName,
-    targetLanguages: uniqueLanguages,
+    targetLanguages: [targetLanguage || 'en'],
   };
 });
 
@@ -552,7 +608,7 @@ ipcMain.handle('translation:listTranslations', async (_event, lang) => {
     throw new Error('A valid license is required before browsing translations.');
   }
 
-  const resolvedLang = resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase());
+  const resolvedLang = String(lang || '').trim();
   if (!resolvedLang) {
     return [];
   }
@@ -584,7 +640,7 @@ ipcMain.handle('translation:downloadFile', async (_event, { translationId, lang 
     throw new Error('A valid license is required before downloading.');
   }
 
-  const resolvedLang = resolveConfiguredTargetLanguage(String(lang || '').trim().toLowerCase());
+  const resolvedLang = String(lang || '').trim();
   if (!translationId || !resolvedLang) {
     throw new Error('translationId and lang are required for download.');
   }

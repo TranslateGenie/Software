@@ -1,6 +1,5 @@
 /**
  * DropZone.jsx — Drag-and-drop file input component.
- * Accepts DOCX, PPTX, XLSX, and PDF files.
  */
 
 import React, { useState, useRef } from 'react';
@@ -12,16 +11,24 @@ const ACCEPTED_TYPES = [
   'application/pdf', // .pdf
 ];
 
-const ACCEPTED_EXTENSIONS = ['.docx', '.pptx', '.xlsx', '.pdf'];
+const ACCEPTED_EXTENSIONS = new Set([
+  '.docx', '.pptx', '.xlsx', '.pdf',
+  '.txt', '.md', '.mdx', '.markdown', '.rst', '.tex', '.rtf',
+  '.html', '.htm', '.xhtml', '.xml', '.svg',
+  '.css', '.scss', '.sass', '.less',
+  '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env', '.csv', '.tsv',
+  '.js', '.ts', '.jsx', '.tsx', '.vue', '.svelte',
+  '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h', '.hpp',
+  '.cs', '.go', '.rs', '.swift', '.kt', '.kts',
+  '.sh', '.bash', '.zsh', '.ps1', '.lua', '.pl', '.r', '.scala', '.dart',
+  '.sql', '.log',
+]);
 
-/**
- * Validate that a File object is of an accepted type.
- * Falls back to extension check since MIME types can differ by OS.
- */
 function isAcceptedFile(file) {
+  if (file.type.startsWith('text/')) return true;
   if (ACCEPTED_TYPES.includes(file.type)) return true;
   const ext = '.' + file.name.split('.').pop().toLowerCase();
-  return ACCEPTED_EXTENSIONS.includes(ext);
+  return ACCEPTED_EXTENSIONS.has(ext);
 }
 
 export default function DropZone({ onFilesAdded }) {
@@ -34,7 +41,7 @@ export default function DropZone({ onFilesAdded }) {
 
     if (invalid.length > 0) {
       alert(
-        `The following files are not supported and were skipped:\n${invalid.map((f) => f.name).join('\n')}\n\nAccepted formats: DOCX, PPTX, XLSX, PDF`
+        `The following files are not supported and were skipped:\n${invalid.map((f) => f.name).join('\n')}\n\nSupported formats include DOCX, PPTX, XLSX, PDF, HTML, CSS, JS, TS, MD, TXT, CSV, YAML, and many more text-based formats.`
       );
     }
 
@@ -78,13 +85,13 @@ export default function DropZone({ onFilesAdded }) {
       <p className="dropzone__text">
         Drag &amp; drop documents here, or <strong>click to browse</strong>
       </p>
-      <p className="dropzone__hint">Supported formats: DOCX · PPTX · XLSX · PDF</p>
+      <p className="dropzone__hint">Supported: DOCX · PPTX · XLSX · PDF · HTML · CSS · JS · TS · MD · TXT · CSV · YAML · and more</p>
 
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept={ACCEPTED_EXTENSIONS.join(',')}
+        accept={Array.from(ACCEPTED_EXTENSIONS).join(',')}
         style={{ display: 'none' }}
         onChange={onInputChange}
       />

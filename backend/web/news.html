@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Updates — Translate Genie</title>
+  <link rel="icon" type="image/png" href="Mascot.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <nav class="nav">
+    <img src="Mascot.png" alt="Translate Genie" class="nav-logo" />
+    <a href="index.html">Home</a>
+    <a href="pricing.html">Pricing</a>
+    <a href="download.html">Download</a>
+    <a href="news.html">News</a>
+  </nav>
+
+  <main>
+
+    <section class="card hero-card">
+      <img src="Logo2.png" alt="Translate Genie" class="hero-logo" />
+      <h3 class="hero-title">Product Updates</h3>
+      <p class="hero-desc">
+        Release notes, feature announcements, and improvements for Translate Genie —
+        newest first.
+      </p>
+    </section>
+
+    <section class="section-block">
+      <div class="news-list" id="newsList">
+        <p class="no-results" id="newsLoading">Loading updates&#8230;</p>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // Dev (localhost): served by local Express. Prod (GitHub Pages): fetched from S3.
+    // Replace the S3 URL below with your actual bucket once it's live.
+    const DATA_URL = './news.json';
+
+    async function loadNews() {
+      const res = await fetch(DATA_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const items = await res.json();
+      // Sort newest first
+      return items.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+
+    function formatDate(d) {
+      return new Date(d + 'T00:00:00').toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric'
+      });
+    }
+
+    function renderNewsItem(item) {
+      return `
+        <div class="news-item">
+          <div class="news-item-header">
+            <span class="news-tag news-tag-${item.tag}">${item.tag}</span>
+            <span class="news-version">${item.version}</span>
+            <span class="news-date">${formatDate(item.date)}</span>
+          </div>
+          <h3 class="news-title">${item.title}</h3>
+          <p class="news-body">${item.body}</p>
+        </div>`;
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      const list = document.getElementById('newsList');
+      try {
+        const items = await loadNews();
+        list.innerHTML = items.map(renderNewsItem).join('');
+      } catch (err) {
+        console.error(err);
+        list.innerHTML = '<p class="no-results">Could not load updates — please try again later.</p>';
+      }
+    });
+  </script>
+
+</body>
+</html>

@@ -38,6 +38,25 @@ jobs:
       - name: Install backend dependencies
         run: npm ci --prefix backend
 
+      - name: Generate production .env
+        shell: bash
+        run: |
+          cat > electron/.env << 'ENVEOF'
+          MDAS_ENV=prod
+          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION=${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
+          LICENSES_PATH=${{ secrets.LICENSES_PATH }}
+          AZURE_TRANSLATOR_KEY=${{ secrets.AZURE_TRANSLATOR_KEY }}
+          AZURE_TRANSLATOR_ENDPOINT=${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
+          AZURE_TRANSLATOR_REGION=${{ secrets.AZURE_TRANSLATOR_REGION }}
+          LOCAL_HELPER_PORT=8787
+          PRICING_PAGE_URL=https://translategenie.github.io/pricing.html
+          LICENSE_SIGNATURE_REQUIRED=false
+          MDAS_ADMIN_PASSWORD=${{ secrets.MDAS_ADMIN_PASSWORD }}
+          ENVEOF
+
       - name: Build Electron app
         run: npm run build --prefix electron
         env:

@@ -1,33 +1,47 @@
 import { randomUUID } from 'crypto';
+import { loadLicenses, saveLicenses } from '../lib/storage.js';
 import {
-  loadLicenses,
-  saveLicenses,
   storeTranslationAssets,
   listTranslationsForLanguage,
   getTranslationMetadata,
   getTranslationFileBuffer,
-} from '../lib/s3-data.js';
+} from '../lib/user-storage.js';
 import { resolveLicenseFromBearer } from './validate-license.js';
 
 const AZURE_TRANSLATOR_KEY = process.env.AZURE_TRANSLATOR_KEY || '';
 const AZURE_TRANSLATOR_REGION = process.env.AZURE_TRANSLATOR_REGION || '';
 const AZURE_TRANSLATOR_ENDPOINT = process.env.AZURE_TRANSLATOR_ENDPOINT || 'https://api.cognitive.microsofttranslator.com';
 
-function isLikelyText(mimeType, fileName) {
-  const normalizedMime = String(mimeType || '').toLowerCase();
-  const normalizedName = String(fileName || '').toLowerCase();
+const TEXT_EXTENSIONS = new Set([
+  '.txt', '.md', '.mdx', '.markdown', '.rst', '.tex', '.rtf',
+  '.html', '.htm', '.xhtml', '.xml', '.svg',
+  '.css', '.scss', '.sass', '.less',
+  '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env', '.csv', '.tsv',
+  '.js', '.ts', '.jsx', '.tsx', '.vue', '.svelte',
+  '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h', '.hpp',
+  '.cs', '.go', '.rs', '.swift', '.kt', '.kts',
+  '.sh', '.bash', '.zsh', '.ps1', '.lua', '.pl', '.r', '.scala', '.dart',
+  '.sql', '.log',
+]);
 
-  if (normalizedMime.startsWith('text/')) return true;
-  if (normalizedMime.includes('json') || normalizedMime.includes('xml')) return true;
-  return normalizedName.endsWith('.txt') || normalizedName.endsWith('.md') || normalizedName.endsWith('.csv') || normalizedName.endsWith('.json');
+function isLikelyText(mimeType, fileName) {
+  const mime = String(mimeType || '').toLowerCase();
+  const name = String(fileName || '').toLowerCase();
+
+  if (mime.startsWith('text/')) return true;
+  if (mime.includes('json') || mime.includes('xml') || mime.includes('yaml')) return true;
+
+  const ext = '.' + name.split('.').pop();
+  return TEXT_EXTENSIONS.has(ext);
 }
 
-async function translateText(text, targetLanguage) {
+async function translateText(text, targetLanguage, fromLanguage = '') {
   if (!AZURE_TRANSLATOR_KEY || !AZURE_TRANSLATOR_REGION) {
     throw new Error('Azure Translator is not configured. Set AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION.');
   }
 
-  const endpoint = `${AZURE_TRANSLATOR_ENDPOINT.replace(/\/$/, '')}/translate?api-version=3.0&to=${encodeURIComponent(targetLanguage)}`;
+  const fromParam = fromLanguage ? `&from=${encodeURIComponent(fromLanguage)}` : '';
+  const endpoint = `${AZURE_TRANSLATOR_ENDPOINT.replace(/\/$/, '')}/translate?api-version=3.0&to=${encodeURIComponent(targetLanguage)}${fromParam}`;
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -87,19 +101,23 @@ export async function translateHandler(req, res) {
       return res.status(401).json({ ok: false, error: resolved.reason || 'invalid-license' });
     }
 
-    const { fileName, base64Content, targetLanguage = 'en', mimeType = 'application/octet-stream' } = req.body || {};
+    const { fileName, base64Content, targetLanguage = 'en', fromLanguage = '', mimeType = 'application/octet-stream' } = req.body || {};
     if (!fileName || !base64Content || !targetLanguage) {
       return res.status(400).json({ ok: false, error: 'fileName, base64Content, and targetLanguage are required.' });
     }
 
     const inputBuffer = Buffer.from(base64Content, 'base64');
     const isTextFile = isLikelyText(mimeType, fileName);
-    const inputText = isTextFile ? inputBuffer.toString('utf8') : '';
-    const translatedText = isTextFile ? await translateText(inputText, targetLanguage) : null;
-    const outputBuffer = isTextFile ? Buffer.from(translatedText, 'utf8') : inputBuffer;
+
+    let outputBuffer = inputBuffer;
+    if (isTextFile && process.env.MDAS_ENV !== 'dev') {
+      const inputText = inputBuffer.toString('utf8');
+      const translatedText = await translateText(inputText, targetLanguage, fromLanguage);
+      outputBuffer = Buffer.from(translatedText, 'utf8');
+    }
 
     const translationId = randomUUID();
-    const charactersCharged = isTextFile ? inputText.length : 0;
+    const charactersCharged = isTextFile ? inputBuffer.length : 0;
     const usageRecord = await incrementLicenseUsage(resolved.licenseKey, 1, charactersCharged);
 
     const stored = await storeTranslationAssets({
