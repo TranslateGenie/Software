@@ -22,6 +22,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   '.cs', '.go', '.rs', '.swift', '.kt', '.kts',
   '.sh', '.bash', '.zsh', '.ps1', '.lua', '.pl', '.r', '.scala', '.dart',
   '.sql', '.log',
+  '.srt', '.vtt',
 ]);
 
 function isAcceptedFile(file) {

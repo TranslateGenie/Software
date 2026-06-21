@@ -195,6 +195,50 @@ async function translateXlsx(inputBuffer, targetLanguage, fromLanguage) {
   return Buffer.from(zip.generate({ type: 'nodebuffer' }));
 }
 
+async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipBlock) {
+  const blocks = text.split(/\r?\n\r?\n/);
+
+  const cueData = [];
+  const parsedBlocks = blocks.map((block) => {
+    if (skipBlock?.(block)) return { type: 'other', raw: block };
+    const lines = block.split(/\r?\n/);
+    const tsIndex = lines.findIndex((l) => l.includes('-->'));
+    if (tsIndex === -1) return { type: 'other', raw: block };
+    const textLines = lines.slice(tsIndex + 1).filter((l) => l.trim());
+    if (textLines.length === 0) return { type: 'other', raw: block };
+    const cueIdx = cueData.length;
+    cueData.push({ text: textLines.join('\n'), lines, tsIndex });
+    return { type: 'cue', cueIdx, lines, tsIndex };
+  });
+
+  if (cueData.length === 0) return Buffer.from(text, 'utf8');
+
+  const BATCH = 100;
+  const translations = [];
+  for (let i = 0; i < cueData.length; i += BATCH) {
+    translations.push(...await callAzureTranslate(cueData.slice(i, i + BATCH).map((c) => c.text), targetLanguage, fromLanguage));
+  }
+
+  const output = parsedBlocks.map((pb) => {
+    if (pb.type === 'other') return pb.raw;
+    const header = pb.lines.slice(0, pb.tsIndex + 1);
+    return [...header, translations[pb.cueIdx]].join('\n');
+  });
+
+  return Buffer.from(output.join('\n\n'), 'utf8');
+}
+
+async function translateSrt(inputBuffer, targetLanguage, fromLanguage) {
+  return translateSubtitleBlocks(inputBuffer.toString('utf8'), targetLanguage, fromLanguage);
+}
+
+async function translateVtt(inputBuffer, targetLanguage, fromLanguage) {
+  return translateSubtitleBlocks(inputBuffer.toString('utf8'), targetLanguage, fromLanguage, (block) => {
+    const t = block.trim();
+    return t === 'WEBVTT' || t.startsWith('WEBVTT ') || t.startsWith('NOTE') || t.startsWith('STYLE') || t.startsWith('REGION');
+  });
+}
+
 function normalizeTranslationMeta(meta) {
   return {
     id: String(meta?.id || ''),
@@ -244,6 +288,8 @@ export async function translateHandler(req, res) {
     const isDocx = nameLower.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const isPptx = nameLower.endsWith('.pptx') || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     const isXlsx = nameLower.endsWith('.xlsx') || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const isSrt  = nameLower.endsWith('.srt');
+    const isVtt  = nameLower.endsWith('.vtt');
     const isTextFile = isLikelyText(mimeType, fileName);
 
     let outputBuffer = inputBuffer;
@@ -262,6 +308,14 @@ export async function translateHandler(req, res) {
       } else if (isXlsx) {
         outputBuffer = await translateXlsx(inputBuffer, targetLanguage, fromLanguage);
         mode = 'xlsx-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isSrt) {
+        outputBuffer = await translateSrt(inputBuffer, targetLanguage, fromLanguage);
+        mode = 'srt-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isVtt) {
+        outputBuffer = await translateVtt(inputBuffer, targetLanguage, fromLanguage);
+        mode = 'vtt-translation';
         charactersCharged = inputBuffer.length;
       } else if (isTextFile) {
         const inputText = inputBuffer.toString('utf8');

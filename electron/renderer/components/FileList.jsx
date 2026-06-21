@@ -27,6 +27,8 @@ const FILE_ICONS = {
   // Documents
   md: '📝', mdx: '📝', markdown: '📝', rst: '📝', tex: '📄', rtf: '📄',
   txt: '📄', log: '📄',
+  // Subtitles
+  srt: '🎬', vtt: '🎬',
 };
 
 function getIcon(fileName) {
