@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import PizZip from 'pizzip';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
 import {
   storeTranslationAssets,
@@ -35,13 +37,17 @@ function isLikelyText(mimeType, fileName) {
   return TEXT_EXTENSIONS.has(ext);
 }
 
-async function translateText(text, targetLanguage, fromLanguage = '') {
+async function callAzureTranslate(texts, targetLanguage, fromLanguage = '') {
   if (!AZURE_TRANSLATOR_KEY || !AZURE_TRANSLATOR_REGION) {
     throw new Error('Azure Translator is not configured. Set AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION.');
   }
 
   const fromParam = fromLanguage ? `&from=${encodeURIComponent(fromLanguage)}` : '';
-  const endpoint = `${AZURE_TRANSLATOR_ENDPOINT.replace(/\/$/, '')}/translate?api-version=3.0&to=${encodeURIComponent(targetLanguage)}${fromParam}`;
+  const base = AZURE_TRANSLATOR_ENDPOINT.replace(/\/$/, '');
+  const path = base.includes('cognitiveservices.azure.com')
+    ? '/translator/text/v3.0/translate'
+    : '/translate';
+  const endpoint = `${base}${path}?api-version=3.0&to=${encodeURIComponent(targetLanguage)}${fromParam}`;
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -50,7 +56,7 @@ async function translateText(text, targetLanguage, fromLanguage = '') {
       'Ocp-Apim-Subscription-Key': AZURE_TRANSLATOR_KEY,
       'Ocp-Apim-Subscription-Region': AZURE_TRANSLATOR_REGION,
     },
-    body: JSON.stringify([{ text }]),
+    body: JSON.stringify(texts.map((t) => ({ text: t }))),
   });
 
   if (!response.ok) {
@@ -59,7 +65,134 @@ async function translateText(text, targetLanguage, fromLanguage = '') {
   }
 
   const payload = await response.json();
-  return String(payload?.[0]?.translations?.[0]?.text || '');
+  return payload.map((item) => String(item?.translations?.[0]?.text || ''));
+}
+
+async function translateText(text, targetLanguage, fromLanguage = '') {
+  const results = await callAzureTranslate([text], targetLanguage, fromLanguage);
+  return results[0];
+}
+
+async function translateDocx(inputBuffer, targetLanguage, fromLanguage) {
+  const zip = new PizZip(inputBuffer);
+  const docFile = zip.file('word/document.xml');
+  if (!docFile) throw new Error('Invalid DOCX: word/document.xml not found.');
+
+  const xmlStr = docFile.asText();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlStr, 'application/xml');
+
+  const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const paragraphs = Array.from(doc.getElementsByTagNameNS(NS, 'p'));
+
+  const paraData = paragraphs
+    .map((para) => {
+      const tNodes = Array.from(para.getElementsByTagNameNS(NS, 't'));
+      const text = tNodes.map((n) => n.textContent || '').join('');
+      return { tNodes, text };
+    })
+    .filter((p) => p.text.trim());
+
+  if (paraData.length === 0) return inputBuffer;
+
+  // Azure supports up to 100 text elements per request
+  const BATCH = 100;
+  const translations = [];
+  for (let i = 0; i < paraData.length; i += BATCH) {
+    const chunk = paraData.slice(i, i + BATCH).map((p) => p.text);
+    const results = await callAzureTranslate(chunk, targetLanguage, fromLanguage);
+    translations.push(...results);
+  }
+
+  // Write translated text back — first <w:t> gets the full paragraph translation, rest are cleared
+  paraData.forEach(({ tNodes }, idx) => {
+    if (tNodes.length === 0) return;
+    tNodes[0].textContent = translations[idx] ?? '';
+    for (let j = 1; j < tNodes.length; j++) tNodes[j].textContent = '';
+  });
+
+  const serializer = new XMLSerializer();
+  zip.file('word/document.xml', serializer.serializeToString(doc));
+  return Buffer.from(zip.generate({ type: 'nodebuffer' }));
+}
+
+async function translatePptx(inputBuffer, targetLanguage, fromLanguage) {
+  const zip = new PizZip(inputBuffer);
+  const NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+
+  const slideFiles = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort();
+
+  if (slideFiles.length === 0) return inputBuffer;
+
+  const parser = new DOMParser();
+  const slideData = slideFiles.map((name) => {
+    const doc = parser.parseFromString(zip.file(name).asText(), 'application/xml');
+    const paraData = Array.from(doc.getElementsByTagNameNS(NS, 'p'))
+      .map((para) => {
+        const tNodes = Array.from(para.getElementsByTagNameNS(NS, 't'));
+        return { tNodes, text: tNodes.map((n) => n.textContent || '').join('') };
+      })
+      .filter((p) => p.text.trim());
+    return { name, doc, paraData };
+  });
+
+  const allParas = slideData.flatMap((s) => s.paraData);
+  if (allParas.length === 0) return inputBuffer;
+
+  const BATCH = 100;
+  const translations = [];
+  for (let i = 0; i < allParas.length; i += BATCH) {
+    translations.push(...await callAzureTranslate(allParas.slice(i, i + BATCH).map((p) => p.text), targetLanguage, fromLanguage));
+  }
+
+  let offset = 0;
+  const serializer = new XMLSerializer();
+  for (const { name, doc, paraData } of slideData) {
+    paraData.forEach(({ tNodes }) => {
+      if (!tNodes.length) return;
+      tNodes[0].textContent = translations[offset++] ?? '';
+      for (let j = 1; j < tNodes.length; j++) tNodes[j].textContent = '';
+    });
+    zip.file(name, serializer.serializeToString(doc));
+  }
+
+  return Buffer.from(zip.generate({ type: 'nodebuffer' }));
+}
+
+async function translateXlsx(inputBuffer, targetLanguage, fromLanguage) {
+  const zip = new PizZip(inputBuffer);
+  const ssFile = zip.file('xl/sharedStrings.xml');
+  if (!ssFile) return inputBuffer;
+
+  const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(ssFile.asText(), 'application/xml');
+
+  const siData = Array.from(doc.getElementsByTagNameNS(NS, 'si'))
+    .map((si) => {
+      const tNodes = Array.from(si.getElementsByTagNameNS(NS, 't'));
+      return { tNodes, text: tNodes.map((n) => n.textContent || '').join('') };
+    })
+    .filter((s) => s.text.trim());
+
+  if (siData.length === 0) return inputBuffer;
+
+  const BATCH = 100;
+  const translations = [];
+  for (let i = 0; i < siData.length; i += BATCH) {
+    translations.push(...await callAzureTranslate(siData.slice(i, i + BATCH).map((s) => s.text), targetLanguage, fromLanguage));
+  }
+
+  siData.forEach(({ tNodes }, idx) => {
+    if (!tNodes.length) return;
+    tNodes[0].textContent = translations[idx] ?? '';
+    for (let j = 1; j < tNodes.length; j++) tNodes[j].textContent = '';
+  });
+
+  zip.file('xl/sharedStrings.xml', new XMLSerializer().serializeToString(doc));
+  return Buffer.from(zip.generate({ type: 'nodebuffer' }));
 }
 
 function normalizeTranslationMeta(meta) {
@@ -107,17 +240,39 @@ export async function translateHandler(req, res) {
     }
 
     const inputBuffer = Buffer.from(base64Content, 'base64');
+    const nameLower = fileName.toLowerCase();
+    const isDocx = nameLower.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isPptx = nameLower.endsWith('.pptx') || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    const isXlsx = nameLower.endsWith('.xlsx') || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     const isTextFile = isLikelyText(mimeType, fileName);
 
     let outputBuffer = inputBuffer;
-    if (isTextFile && process.env.MDAS_ENV !== 'dev') {
-      const inputText = inputBuffer.toString('utf8');
-      const translatedText = await translateText(inputText, targetLanguage, fromLanguage);
-      outputBuffer = Buffer.from(translatedText, 'utf8');
+    let mode = 'binary-pass-through';
+    let charactersCharged = 0;
+
+    if (AZURE_TRANSLATOR_KEY) {
+      if (isDocx) {
+        outputBuffer = await translateDocx(inputBuffer, targetLanguage, fromLanguage);
+        mode = 'docx-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isPptx) {
+        outputBuffer = await translatePptx(inputBuffer, targetLanguage, fromLanguage);
+        mode = 'pptx-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isXlsx) {
+        outputBuffer = await translateXlsx(inputBuffer, targetLanguage, fromLanguage);
+        mode = 'xlsx-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isTextFile) {
+        const inputText = inputBuffer.toString('utf8');
+        const translatedText = await translateText(inputText, targetLanguage, fromLanguage);
+        outputBuffer = Buffer.from(translatedText, 'utf8');
+        mode = 'azure-text-translation';
+        charactersCharged = inputBuffer.length;
+      }
     }
 
     const translationId = randomUUID();
-    const charactersCharged = isTextFile ? inputBuffer.length : 0;
     const usageRecord = await incrementLicenseUsage(resolved.licenseKey, 1, charactersCharged);
 
     const stored = await storeTranslationAssets({
@@ -129,7 +284,7 @@ export async function translateHandler(req, res) {
       outputBuffer,
       metadata: {
         mimeType,
-        mode: isTextFile ? 'azure-text-translation' : 'binary-pass-through',
+        mode,
         inputBytes: inputBuffer.length,
         outputBytes: outputBuffer.length,
         charactersCharged,

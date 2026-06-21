@@ -37,9 +37,10 @@
   </main>
 
   <script>
-    // Dev (localhost): served by local Express. Prod (GitHub Pages): fetched from S3.
-    // Replace the S3 URL below with your actual bucket once it's live.
-    const DATA_URL = './news.json';
+    const IS_GITHUB_PAGES = window.location.hostname === 'translategenie.github.io';
+    const DATA_URL = IS_GITHUB_PAGES
+      ? 'https://translate-genie-json.s3.us-east-2.amazonaws.com/news.json'
+      : './news.json';
 
     async function loadNews() {
       const res = await fetch(DATA_URL);

@@ -135,11 +135,10 @@
 
   <script>
     // ── Config ───────────────────────────────────────────────────────────────
-    // Dev (localhost): served by local Express. Prod (GitHub Pages): fetched from S3.
-    // Replace the S3 URL below with your actual bucket once it's live.
-    // To wire up a REST API later, replace DATA_URL with the endpoint and swap
-    // loadData() for a fetch call with queryReviews() params as query-string args.
-    const DATA_URL = './reviews.json';
+    const IS_GITHUB_PAGES = window.location.hostname === 'translategenie.github.io';
+    const DATA_URL = IS_GITHUB_PAGES
+      ? 'https://translate-genie-json.s3.us-east-2.amazonaws.com/reviews.json'
+      : './reviews.json';
     const PER_PAGE       = 10;
     const CAROUSEL_TOTAL = 9;   // top reviews in the carousel (3 pages × 3 cards)
     const CAROUSEL_PAGE  = 3;   // cards visible per carousel page
