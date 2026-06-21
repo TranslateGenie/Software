@@ -73,6 +73,24 @@ async function translateText(text, targetLanguage, fromLanguage = '') {
   return results[0];
 }
 
+// Splits an array of strings into batches that respect Azure's per-request limits:
+// max 100 elements and max 50,000 characters (we stay at 48,000 for headroom).
+function chunkTexts(texts, maxElements = 100, maxChars = 48000) {
+  const chunks = [];
+  let chunk = [], chars = 0;
+  for (const text of texts) {
+    if (chunk.length >= maxElements || (chunk.length > 0 && chars + text.length > maxChars)) {
+      chunks.push(chunk);
+      chunk = [];
+      chars = 0;
+    }
+    chunk.push(text);
+    chars += text.length;
+  }
+  if (chunk.length) chunks.push(chunk);
+  return chunks;
+}
+
 async function translateDocx(inputBuffer, targetLanguage, fromLanguage) {
   const zip = new PizZip(inputBuffer);
   const docFile = zip.file('word/document.xml');
@@ -95,13 +113,9 @@ async function translateDocx(inputBuffer, targetLanguage, fromLanguage) {
 
   if (paraData.length === 0) return inputBuffer;
 
-  // Azure supports up to 100 text elements per request
-  const BATCH = 100;
   const translations = [];
-  for (let i = 0; i < paraData.length; i += BATCH) {
-    const chunk = paraData.slice(i, i + BATCH).map((p) => p.text);
-    const results = await callAzureTranslate(chunk, targetLanguage, fromLanguage);
-    translations.push(...results);
+  for (const chunk of chunkTexts(paraData.map((p) => p.text))) {
+    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
   // Write translated text back — first <w:t> gets the full paragraph translation, rest are cleared
@@ -141,10 +155,9 @@ async function translatePptx(inputBuffer, targetLanguage, fromLanguage) {
   const allParas = slideData.flatMap((s) => s.paraData);
   if (allParas.length === 0) return inputBuffer;
 
-  const BATCH = 100;
   const translations = [];
-  for (let i = 0; i < allParas.length; i += BATCH) {
-    translations.push(...await callAzureTranslate(allParas.slice(i, i + BATCH).map((p) => p.text), targetLanguage, fromLanguage));
+  for (const chunk of chunkTexts(allParas.map((p) => p.text))) {
+    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
   let offset = 0;
@@ -179,10 +192,9 @@ async function translateXlsx(inputBuffer, targetLanguage, fromLanguage) {
 
   if (siData.length === 0) return inputBuffer;
 
-  const BATCH = 100;
   const translations = [];
-  for (let i = 0; i < siData.length; i += BATCH) {
-    translations.push(...await callAzureTranslate(siData.slice(i, i + BATCH).map((s) => s.text), targetLanguage, fromLanguage));
+  for (const chunk of chunkTexts(siData.map((s) => s.text))) {
+    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
   siData.forEach(({ tNodes }, idx) => {
@@ -213,10 +225,9 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
 
   if (cueData.length === 0) return Buffer.from(text, 'utf8');
 
-  const BATCH = 100;
   const translations = [];
-  for (let i = 0; i < cueData.length; i += BATCH) {
-    translations.push(...await callAzureTranslate(cueData.slice(i, i + BATCH).map((c) => c.text), targetLanguage, fromLanguage));
+  for (const chunk of chunkTexts(cueData.map((c) => c.text))) {
+    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
   const output = parsedBlocks.map((pb) => {
@@ -226,6 +237,27 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
   });
 
   return Buffer.from(output.join('\n\n'), 'utf8');
+}
+
+async function translatePdf(inputBuffer, targetLanguage, fromLanguage) {
+  const { default: pdfParse } = await import('pdf-parse');
+  const data = await pdfParse(inputBuffer);
+
+  // Split on blank lines; collapse wrapped lines within each paragraph into a single string.
+  // Filters out very short fragments that are likely page numbers or running headers.
+  const paragraphs = data.text
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((p) => p.length > 3);
+
+  if (paragraphs.length === 0) return Buffer.from(data.text, 'utf8');
+
+  const translations = [];
+  for (const chunk of chunkTexts(paragraphs)) {
+    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
+  }
+
+  return Buffer.from(translations.join('\n\n'), 'utf8');
 }
 
 async function translateSrt(inputBuffer, targetLanguage, fromLanguage) {
@@ -288,11 +320,13 @@ export async function translateHandler(req, res) {
     const isDocx = nameLower.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const isPptx = nameLower.endsWith('.pptx') || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     const isXlsx = nameLower.endsWith('.xlsx') || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const isPdf  = nameLower.endsWith('.pdf')  || mimeType === 'application/pdf';
     const isSrt  = nameLower.endsWith('.srt');
     const isVtt  = nameLower.endsWith('.vtt');
     const isTextFile = isLikelyText(mimeType, fileName);
 
     let outputBuffer = inputBuffer;
+    let outputFileName = fileName;
     let mode = 'binary-pass-through';
     let charactersCharged = 0;
 
@@ -308,6 +342,11 @@ export async function translateHandler(req, res) {
       } else if (isXlsx) {
         outputBuffer = await translateXlsx(inputBuffer, targetLanguage, fromLanguage);
         mode = 'xlsx-translation';
+        charactersCharged = inputBuffer.length;
+      } else if (isPdf) {
+        outputBuffer = await translatePdf(inputBuffer, targetLanguage, fromLanguage);
+        outputFileName = fileName.replace(/\.pdf$/i, '.txt');
+        mode = 'pdf-translation';
         charactersCharged = inputBuffer.length;
       } else if (isSrt) {
         outputBuffer = await translateSrt(inputBuffer, targetLanguage, fromLanguage);
@@ -333,7 +372,7 @@ export async function translateHandler(req, res) {
       org: usageRecord.org,
       translationId,
       targetLanguage,
-      fileName,
+      fileName: outputFileName,
       inputBuffer,
       outputBuffer,
       metadata: {
@@ -350,7 +389,7 @@ export async function translateHandler(req, res) {
       translationId,
       metadataKey: stored.metadataKey,
       outputKey: stored.outputKey,
-      fileName,
+      fileName: outputFileName,
       targetLanguage,
       usage: {
         requests: Number(usageRecord.requests || 0),
