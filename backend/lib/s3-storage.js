@@ -6,20 +6,27 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 
-const AWS_REGION = process.env.AWS_REGION || '';
+let _s3Client = null;
 
-const s3Client = new S3Client({
-  region: AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-  },
-});
+function getS3Client() {
+  if (!_s3Client) {
+    const region = process.env.AWS_REGION || '';
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !region) {
+      throw new Error('AWS S3 credentials are incomplete. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION.');
+    }
+    _s3Client = new S3Client({
+      region,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return _s3Client;
+}
 
 function ensureS3Config() {
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !AWS_REGION) {
-    throw new Error('AWS S3 credentials are incomplete. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION.');
-  }
+  getS3Client(); // throws if credentials are missing
 }
 
 async function streamToBuffer(stream) {
@@ -32,7 +39,7 @@ async function streamToBuffer(stream) {
 
 export async function uploadFile(bucket, key, buffer, contentType = 'application/octet-stream') {
   ensureS3Config();
-  await s3Client.send(
+  await getS3Client().send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -45,7 +52,7 @@ export async function uploadFile(bucket, key, buffer, contentType = 'application
 
 export async function downloadFile(bucket, key) {
   ensureS3Config();
-  const response = await s3Client.send(
+  const response = await getS3Client().send(
     new GetObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -81,7 +88,7 @@ export async function getJson(bucket, key) {
 
 export async function listObjects(bucket, prefix) {
   ensureS3Config();
-  const response = await s3Client.send(
+  const response = await getS3Client().send(
     new ListObjectsV2Command({
       Bucket: bucket,
       Prefix: prefix,
@@ -98,7 +105,7 @@ export async function listObjects(bucket, prefix) {
 
 export async function deleteObject(bucket, key) {
   ensureS3Config();
-  await s3Client.send(
+  await getS3Client().send(
     new DeleteObjectCommand({
       Bucket: bucket,
       Key: key,
