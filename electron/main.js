@@ -86,6 +86,8 @@ async function startLocalHelperServer() {
     throw new Error(`Local helper server not found at ${serverPath}.`);
   }
 
+  const stderrBuffer = [];
+
   localHelperProcess = spawn(process.execPath, [serverPath], {
     env: {
       ...process.env,
@@ -103,6 +105,7 @@ async function startLocalHelperServer() {
 
   localHelperProcess.stderr?.on('data', (chunk) => {
     process.stderr.write(`[local-helper] ${chunk}`);
+    stderrBuffer.push(chunk.toString());
   });
 
   localHelperProcess.on('exit', (code, signal) => {
@@ -112,7 +115,12 @@ async function startLocalHelperServer() {
     }
   });
 
-  await waitForLocalHelperReady();
+  try {
+    await waitForLocalHelperReady();
+  } catch (err) {
+    const detail = stderrBuffer.join('').trim().slice(0, 1200);
+    throw new Error(`${err.message}${detail ? `\n\nBackend error:\n${detail}` : ''}`);
+  }
 }
 
 async function stopLocalHelperServer() {
