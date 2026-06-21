@@ -24,72 +24,108 @@
       <p class="hero-desc">Everything you need to know about Translate Genie.</p>
     </section>
 
-    <section class="section-block legal-section">
+    <section class="section-block" id="faqSection">
 
-      <div class="faq-item">
-        <p class="faq-question">How do I install Translate Genie?</p>
-        <p class="faq-answer">
-          Translate Genie is distributed through GitHub Releases. Head to the
-          <a href="download.html">Download page</a>, click <strong>Download Latest Release</strong>,
-          and run the <code>.exe</code> installer. Once installed, launch the app from your Start
-          Menu or Desktop and enter your license key to activate.
-        </p>
+      <div class="reviews-header">
+        <input type="text" class="search-bar" id="faqSearch" placeholder="Search questions&#8230;" />
       </div>
 
-      <div class="faq-item">
-        <p class="faq-question">What document types can I have translated?</p>
-        <p class="faq-answer">
-          Translate Genie supports a wide range of file types across several categories:
-        </p>
-        <ul style="margin-top: 10px; padding-left: 20px; color: var(--text-muted); font-size: 14px; line-height: 1.8;">
-          <li><strong>Office documents</strong> — DOCX, PPTX, XLSX</li>
-          <li><strong>Markup &amp; web</strong> — HTML, XML, SVG, Markdown</li>
-          <li><strong>Stylesheets</strong> — CSS, SCSS, SASS, LESS</li>
-          <li><strong>Code files</strong> — JS, TS, Python, Ruby, PHP, Java, C#, Go, Rust, Swift, and more</li>
-          <li><strong>Data &amp; config</strong> — JSON, YAML, TOML, CSV, INI, and more</li>
-          <li><strong>Subtitles</strong> — SRT, VTT</li>
-          <li><strong>Plain text</strong> — TXT, LOG, RTF, and others</li>
-        </ul>
-        <p class="faq-answer" style="margin-top: 10px;">
-          PDF files are not currently supported for translation.
-        </p>
-      </div>
-
-      <div class="faq-item">
-        <p class="faq-question">Can Translate Genie translate embedded text in images?</p>
-        <p class="faq-answer">
-          Not currently. Translating text embedded in images requires optical character recognition
-          (OCR) followed by image reconstruction to re-embed the translated text — a process that
-          is complex and often produces inconsistent results. This is not supported at this time.
-          If you need to translate image-based documents, consider converting them to a text-based
-          format first.
-        </p>
-      </div>
-
-      <div class="faq-item">
-        <p class="faq-question">Can Translate Genie translate text in videos?</p>
-        <p class="faq-answer">
-          Yes — through subtitle files. Translate Genie supports <strong>SRT</strong> and
-          <strong>VTT</strong> subtitle formats. Upload your subtitle file, select a target
-          language, and the app will translate all the dialogue lines while preserving your
-          original timestamps exactly. You can then load the translated subtitle file into
-          your video player or editor.
-        </p>
-      </div>
-
-      <div class="faq-item">
-        <p class="faq-question">Is there a free trial?</p>
-        <p class="faq-answer">
-          There is no free trial at this time. However, you can get started with our smallest
-          pack — <strong>One Wish</strong> — at just $10 for 10 requests or 200,000 characters,
-          which is plenty to evaluate the quality of translation for your use case. Visit the
-          <a href="pricing.html">Pricing page</a> to see all available options.
-        </p>
-      </div>
+      <div class="reviews-list" id="faqList"></div>
+      <p class="no-results" id="faqNoResults" style="display:none;">No questions matched your search.</p>
 
     </section>
 
   </main>
+
+  <script>
+    const CATEGORY_COLORS = {
+      'Getting Started': '#5865f2',
+      'File Types':      '#3ba55c',
+      'Features':        '#faa61a',
+      'Pricing':         '#1abc9c',
+    };
+
+    const FAQS = [
+      {
+        q: 'How do I install Translate Genie?',
+        category: 'Getting Started',
+        a: `Translate Genie is distributed through GitHub Releases. Head to the <a href="download.html">Download page</a>, click <strong>Download Latest Release</strong>, and run the <code>.exe</code> installer. Once installed, launch the app from your Start Menu or Desktop and enter your license key to activate.`
+      },
+      {
+        q: 'What document types can I have translated?',
+        category: 'File Types',
+        a: `Translate Genie supports a wide range of file types across several categories:
+          <ul style="margin-top:10px;padding-left:20px;line-height:1.8;">
+            <li><strong>Office documents</strong> — DOCX, PPTX, XLSX</li>
+            <li><strong>Markup &amp; web</strong> — HTML, XML, SVG, Markdown</li>
+            <li><strong>Stylesheets</strong> — CSS, SCSS, SASS, LESS</li>
+            <li><strong>Code files</strong> — JS, TS, Python, Ruby, PHP, Java, C#, Go, Rust, Swift, and more</li>
+            <li><strong>Data &amp; config</strong> — JSON, YAML, TOML, CSV, INI, and more</li>
+            <li><strong>Subtitles</strong> — SRT, VTT</li>
+            <li><strong>Plain text</strong> — TXT, LOG, RTF, and others</li>
+          </ul>
+          <p style="margin-top:10px;margin-bottom:0;">PDF files are not currently supported for translation.</p>`
+      },
+      {
+        q: 'Can Translate Genie translate embedded text in images?',
+        category: 'Features',
+        a: `Not currently. Translating text embedded in images requires optical character recognition (OCR) followed by image reconstruction to re-embed the translated text — a process that is complex and often produces inconsistent results. This is not supported at this time. If you need to translate image-based documents, consider converting them to a text-based format first.`
+      },
+      {
+        q: 'Can Translate Genie translate text in videos?',
+        category: 'Features',
+        a: `Yes — through subtitle files. Translate Genie supports <strong>SRT</strong> and <strong>VTT</strong> subtitle formats. Upload your subtitle file, select a target language, and the app will translate all the dialogue lines while preserving your original timestamps exactly. You can then load the translated subtitle file into your video player or editor.`
+      },
+      {
+        q: 'Is there a free trial?',
+        category: 'Pricing',
+        a: `There is no free trial at this time. However, you can get started with our smallest pack — <strong>One Wish</strong> — at just $10 for 10 requests or 200,000 characters, which is plenty to evaluate the quality of translation for your use case. Visit the <a href="pricing.html">Pricing page</a> to see all available options.`
+      },
+    ];
+
+    function renderFaq(faq) {
+      const color = CATEGORY_COLORS[faq.category] || '#5865f2';
+      const safeQ = faq.q.replace(/"/g, '&quot;');
+      return `
+        <div class="review-item" data-q="${safeQ.toLowerCase()}" data-a="${faq.a.replace(/<[^>]+>/g,'').toLowerCase()}">
+          <div class="review-item-author">
+            <div class="avatar" style="background:${color}">?</div>
+            <span class="reviewer-name">${faq.q}</span>
+          </div>
+          <div class="review-item-rating">
+            <span style="display:inline-block;background:${color}22;color:${color};border:1px solid ${color}55;border-radius:6px;padding:2px 10px;font-size:0.78rem;font-weight:600;">${faq.category}</span>
+          </div>
+          <div class="review-item-body" style="margin-top:0.75rem;">${faq.a}</div>
+        </div>`;
+    }
+
+    function filterAndRender(query) {
+      const list      = document.getElementById('faqList');
+      const noResults = document.getElementById('faqNoResults');
+      const q         = query.toLowerCase().trim();
+
+      const filtered = q
+        ? FAQS.filter(f =>
+            f.q.toLowerCase().includes(q) ||
+            f.a.replace(/<[^>]+>/g, '').toLowerCase().includes(q) ||
+            f.category.toLowerCase().includes(q)
+          )
+        : FAQS;
+
+      if (filtered.length === 0) {
+        list.innerHTML = '';
+        noResults.style.display = '';
+      } else {
+        list.innerHTML = filtered.map(renderFaq).join('');
+        noResults.style.display = 'none';
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      filterAndRender('');
+      document.getElementById('faqSearch').addEventListener('input', e => filterAndRender(e.target.value));
+    });
+  </script>
 
   <footer class="footer">
     <div class="footer-links">
