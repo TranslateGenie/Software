@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
-    "build": "vite build && electron-builder"
+    "build": "vite build && electron-builder --publish never"
   },
   "dependencies": {
     "electron-store": "^8.2.0",
