@@ -4,7 +4,7 @@
  * between the renderer (React UI) and Node.js APIs.
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut } from 'electron';
 import pkg from 'electron-updater';
 const { autoUpdater } = pkg;
 import path from 'path';
@@ -397,6 +397,10 @@ app.whenReady().then(() => {
       dialog.showErrorBox('Local Helper Failed', error.message || 'Could not start local helper service.');
       app.quit();
     });
+
+  globalShortcut.register('F12', () => {
+    BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
