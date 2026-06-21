@@ -19,9 +19,12 @@ import { config as loadDotenv } from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env for local development. Silently ignored when the file is absent
-// (packaged builds never ship .env).
-loadDotenv({ path: path.join(__dirname, '.env') });
+// In packaged builds the .env lives in resources/ (extraResources) so it can
+// be read as a plain file. In dev it lives next to main.js.
+const envPath = app.isPackaged
+  ? path.join(process.resourcesPath, '.env')
+  : path.join(__dirname, '.env');
+loadDotenv({ path: envPath });
 
 // Persistent settings store (stored in user data dir, never in repo)
 const store = new Store({
@@ -366,7 +369,6 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.webContents.openDevTools();
   });
 }
 

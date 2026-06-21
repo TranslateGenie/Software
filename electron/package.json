@@ -37,7 +37,6 @@
     "files": [
       "main.js",
       "preload.js",
-      ".env",
       "renderer/dist/**",
       "node_modules/**"
     ],
@@ -47,6 +46,10 @@
       "repo": "Software"
     },
     "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
       {
         "from": "../backend",
         "to": "backend",

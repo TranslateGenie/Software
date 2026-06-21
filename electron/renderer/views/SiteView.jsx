@@ -19,7 +19,7 @@ export default function SiteView() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch('http://localhost:8787/news.json')
+    fetch('https://translate-genie-json.s3.us-east-2.amazonaws.com/news.json')
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((data) => {
         const sorted = [...data].sort((a, b) => new Date(b.date) - new Date(a.date));
