@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getJson, putJson } from '../../express/storage/s3Storage.js';
+import { getJson, putJson } from './s3-storage.js';
 
 const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || '';
 const LICENSES_PATH = process.env.LICENSES_PATH || 'licenses.json';
