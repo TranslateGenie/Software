@@ -86,7 +86,7 @@
       }
     })();
   </script>
-  <script>window.TG_API_BASE = 'https://6sl2fkurx8.execute-api.us-east-2.amazonaws.com';</script>
+  <script>window.TG_CHECKOUT_URL = 'https://jb4ttdovazwgzxrsgqm4jhhsuy0zxosa.lambda-url.us-east-2.on.aws/';</script>
 </head>
 <body>
 
@@ -169,10 +169,8 @@
         btn.textContent = 'Preparing checkout…';
         errEl.textContent = '';
 
-        // TG_API_BASE is set in checkout pages hosted on GitHub Pages.
-        // Empty string falls back to relative URLs (local Express / Electron).
-        var TG_API_BASE = window.TG_API_BASE || '';
-        fetch(TG_API_BASE + '/create-checkout', {
+        var checkoutUrl = window.TG_CHECKOUT_URL || '/create-checkout';
+        fetch(checkoutUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ org: purchase.org, pack: purchase.pack }),
