@@ -40,22 +40,32 @@ jobs:
 
       - name: Generate production .env
         shell: bash
+        env:
+          S_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          S_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S_AWS_REGION: ${{ secrets.AWS_REGION }}
+          S_AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          S_LICENSES_PATH: ${{ secrets.LICENSES_PATH }}
+          S_AZURE_TRANSLATOR_KEY: ${{ secrets.AZURE_TRANSLATOR_KEY }}
+          S_AZURE_TRANSLATOR_ENDPOINT: ${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
+          S_AZURE_TRANSLATOR_REGION: ${{ secrets.AZURE_TRANSLATOR_REGION }}
+          S_MDAS_ADMIN_PASSWORD: ${{ secrets.MDAS_ADMIN_PASSWORD }}
         run: |
-          cat > electron/.env << 'ENVEOF'
-          MDAS_ENV=prod
-          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION=${{ secrets.AWS_REGION }}
-          AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
-          LICENSES_PATH=${{ secrets.LICENSES_PATH }}
-          AZURE_TRANSLATOR_KEY=${{ secrets.AZURE_TRANSLATOR_KEY }}
-          AZURE_TRANSLATOR_ENDPOINT=${{ secrets.AZURE_TRANSLATOR_ENDPOINT }}
-          AZURE_TRANSLATOR_REGION=${{ secrets.AZURE_TRANSLATOR_REGION }}
-          LOCAL_HELPER_PORT=8787
-          PRICING_PAGE_URL=https://translategenie.github.io/pricing.html
-          LICENSE_SIGNATURE_REQUIRED=false
-          MDAS_ADMIN_PASSWORD=${{ secrets.MDAS_ADMIN_PASSWORD }}
-          ENVEOF
+          {
+            echo "MDAS_ENV=prod"
+            echo "AWS_ACCESS_KEY_ID=${S_AWS_ACCESS_KEY_ID}"
+            echo "AWS_SECRET_ACCESS_KEY=${S_AWS_SECRET_ACCESS_KEY}"
+            echo "AWS_REGION=${S_AWS_REGION}"
+            echo "AWS_S3_BUCKET=${S_AWS_S3_BUCKET}"
+            echo "LICENSES_PATH=${S_LICENSES_PATH}"
+            echo "AZURE_TRANSLATOR_KEY=${S_AZURE_TRANSLATOR_KEY}"
+            echo "AZURE_TRANSLATOR_ENDPOINT=${S_AZURE_TRANSLATOR_ENDPOINT}"
+            echo "AZURE_TRANSLATOR_REGION=${S_AZURE_TRANSLATOR_REGION}"
+            echo "LOCAL_HELPER_PORT=8787"
+            echo "PRICING_PAGE_URL=https://translategenie.github.io/pricing.html"
+            echo "LICENSE_SIGNATURE_REQUIRED=false"
+            echo "MDAS_ADMIN_PASSWORD=${S_MDAS_ADMIN_PASSWORD}"
+          } > electron/.env
 
       - name: Build Electron app
         run: npm run build --prefix electron
