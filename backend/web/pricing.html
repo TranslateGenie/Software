@@ -240,7 +240,7 @@
         <p class="license-options-title">Select a plan to get started</p>
         <div class="license-cards">
 
-          <div class="license-card" data-name="One Wish" data-price="$10" data-requests="10" data-characters="200,000" data-pack="one-wish">
+          <div class="license-card" data-name="One Wish" data-price="$10" data-price-num="10" data-requests="10" data-characters="200,000" data-pack="one-wish">
             <div class="license-card-left">
               <span class="license-card-name">One Wish</span>
               <span class="license-card-limits">10 requests &nbsp;·&nbsp; 200,000 characters</span>
@@ -248,7 +248,7 @@
             <span class="license-card-price">$10</span>
           </div>
 
-          <div class="license-card" data-name="Two Wishes" data-price="$99" data-requests="100" data-characters="2,000,000" data-pack="starter">
+          <div class="license-card" data-name="Two Wishes" data-price="$99" data-price-num="99" data-requests="100" data-characters="2,000,000" data-pack="starter">
             <div class="license-card-left">
               <span class="license-card-name">Two Wishes</span>
               <span class="license-card-limits">100 requests &nbsp;·&nbsp; 2,000,000 characters</span>
@@ -256,7 +256,7 @@
             <span class="license-card-price">$99</span>
           </div>
 
-          <div class="license-card" data-name="Three Wishes" data-price="$350" data-requests="500" data-characters="10,000,000" data-pack="small">
+          <div class="license-card" data-name="Three Wishes" data-price="$350" data-price-num="350" data-requests="500" data-characters="10,000,000" data-pack="small">
             <div class="license-card-left">
               <span class="license-card-name">Three Wishes</span>
               <span class="license-card-limits">500 requests &nbsp;·&nbsp; 10,000,000 characters</span>
@@ -264,7 +264,7 @@
             <span class="license-card-price">$350</span>
           </div>
 
-          <div class="license-card" data-name="Genie Sidekick" data-price="$1,250" data-requests="2,000" data-characters="40,000,000" data-pack="medium">
+          <div class="license-card" data-name="Genie Sidekick" data-price="$1,250" data-price-num="1250" data-requests="2,000" data-characters="40,000,000" data-pack="medium">
             <div class="license-card-left">
               <span class="license-card-name">Genie Sidekick</span>
               <span class="license-card-limits">2,000 requests &nbsp;·&nbsp; 40,000,000 characters</span>
@@ -272,7 +272,7 @@
             <span class="license-card-price">$1,250</span>
           </div>
 
-          <div class="license-card" data-name="Genie Companion" data-price="$5,000" data-requests="10,000" data-characters="200,000,000" data-pack="enterprise">
+          <div class="license-card" data-name="Genie Companion" data-price="$5,000" data-price-num="5000" data-requests="10,000" data-characters="200,000,000" data-pack="enterprise">
             <div class="license-card-left">
               <span class="license-card-name">Genie Companion</span>
               <span class="license-card-limits">10,000 requests &nbsp;·&nbsp; 200,000,000 characters</span>
@@ -281,7 +281,7 @@
           </div>
 
         </div>
-        <p class="pricing-fine-print">Click a plan to purchase. After checkout, you will receive a license key to activate the app.</p>
+        <p class="pricing-fine-print">Click a plan to purchase. A 5% processing fee and applicable sales tax will be added at checkout. After payment, you will receive a license key to activate the app.</p>
       </div>
 
     </div>
@@ -344,6 +344,7 @@
         selectedPlan = {
           name: card.dataset.name,
           price: card.dataset.price,
+          priceNum: Number(card.dataset.priceNum),
           requests: card.dataset.requests,
           characters: card.dataset.characters,
           pack: card.dataset.pack,
@@ -389,6 +390,7 @@
         org: org,
         tierName: selectedPlan.name,
         price: selectedPlan.price,
+        priceNum: selectedPlan.priceNum,
         pack: selectedPlan.pack,
         requests: selectedPlan.requests,
         characters: selectedPlan.characters,

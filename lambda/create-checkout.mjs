@@ -1,17 +1,16 @@
-import pkg from 'square';
-const { Client, Environment } = pkg;
 import { randomUUID } from 'node:crypto';
 import { loadLicenses, saveLicenses } from './storage.mjs';
 
-const PACK_CONFIG = {
-  'one-wish':   { amountCents: 1000n,   requests: 10,    characters: 200000,    displayName: 'One Wish',        tier: 'T1' },
-  'starter':    { amountCents: 9900n,   requests: 100,   characters: 2000000,   displayName: 'Two Wishes',      tier: 'T1' },
-  'small':      { amountCents: 35000n,  requests: 500,   characters: 10000000,  displayName: 'Three Wishes',    tier: 'T1' },
-  'medium':     { amountCents: 125000n, requests: 2000,  characters: 40000000,  displayName: 'Genie Sidekick',  tier: 'T2' },
-  'enterprise': { amountCents: 500000n, requests: 10000, characters: 200000000, displayName: 'Genie Companion', tier: 'T3' },
-};
+const SQUARE_API = 'https://connect.squareup.com/v2';
+const SQUARE_VERSION = '2024-10-17';
 
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://translategenie.github.io';
+const PACK_CONFIG = {
+  'one-wish':   { amountCents: 1000,   requests: 10,    characters: 200000,    displayName: 'One Wish',        tier: 'T1' },
+  'starter':    { amountCents: 9900,   requests: 100,   characters: 2000000,   displayName: 'Two Wishes',      tier: 'T1' },
+  'small':      { amountCents: 35000,  requests: 500,   characters: 10000000,  displayName: 'Three Wishes',    tier: 'T1' },
+  'medium':     { amountCents: 125000, requests: 2000,  characters: 40000000,  displayName: 'Genie Sidekick',  tier: 'T2' },
+  'enterprise': { amountCents: 500000, requests: 10000, characters: 200000000, displayName: 'Genie Companion', tier: 'T3' },
+};
 
 function generateLicenseKey(org) {
   const root = (org || 'TGEN').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 4) || 'TGEN';
@@ -19,25 +18,21 @@ function generateLicenseKey(org) {
   return `${root}-${rand()}-${rand()}-${rand()}`;
 }
 
-let squareClient = null;
-let cachedLocationId = null;
-
-function getSquareClient() {
-  if (!squareClient) {
-    squareClient = new Client({
-      accessToken: process.env.SQUARE_ACCESS_TOKEN,
-      environment: process.env.SQUARE_ENVIRONMENT === 'sandbox'
-        ? Environment.Sandbox
-        : Environment.Production,
-    });
-  }
-  return squareClient;
+function squareHeaders() {
+  return {
+    'Authorization': `Bearer ${process.env.SQUARE_ACCESS_TOKEN}`,
+    'Content-Type': 'application/json',
+    'Square-Version': SQUARE_VERSION,
+  };
 }
+
+let cachedLocationId = null;
 
 async function getDefaultLocationId() {
   if (cachedLocationId) return cachedLocationId;
-  const { result } = await getSquareClient().locationsApi.listLocations();
-  const active = (result.locations || []).filter(l => l.status === 'ACTIVE');
+  const res = await fetch(`${SQUARE_API}/locations`, { headers: squareHeaders() });
+  const data = await res.json();
+  const active = (data.locations || []).filter(l => l.status === 'ACTIVE');
   if (!active.length) throw new Error('No active Square locations found');
   cachedLocationId = active[0].id;
   return cachedLocationId;
@@ -46,21 +41,12 @@ async function getDefaultLocationId() {
 function respond(statusCode, body) {
   return {
     statusCode,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   };
 }
 
 export const handler = async (event) => {
-  if (event.requestContext?.http?.method === 'OPTIONS' || event.httpMethod === 'OPTIONS') {
-    return respond(204, {});
-  }
-
   let org, pack;
   try {
     const body = JSON.parse(event.body || '{}');
@@ -102,21 +88,31 @@ export const handler = async (event) => {
     await saveLicenses(licenses);
 
     const locationId = await getDefaultLocationId();
-    const { result } = await getSquareClient().checkoutApi.createPaymentLink({
-      idempotencyKey: randomUUID(),
-      quickPay: {
-        name: config.displayName,
-        priceMoney: { amount: config.amountCents, currency: 'USD' },
-        locationId,
-      },
-      checkoutOptions: {
-        redirectUrl,
-        merchantSupportEmail: 'support@translategenie.com',
-      },
-      paymentNote: `org:${org}|pack:${pack}|key:${key}`,
+
+    const squareRes = await fetch(`${SQUARE_API}/online-checkout/payment-links`, {
+      method: 'POST',
+      headers: squareHeaders(),
+      body: JSON.stringify({
+        idempotency_key: randomUUID(),
+        quick_pay: {
+          name: config.displayName,
+          price_money: { amount: Math.round(config.amountCents * 1.05), currency: 'USD' },
+          location_id: locationId,
+        },
+        checkout_options: {
+          redirect_url: redirectUrl,
+          merchant_support_email: 'support@translategenie.com',
+        },
+        payment_note: `org:${org}|pack:${pack}|key:${key}`,
+      }),
     });
 
-    return respond(200, { ok: true, url: result.paymentLink.url });
+    const squareData = await squareRes.json();
+    if (!squareRes.ok) {
+      return respond(500, { ok: false, error: squareData?.errors?.[0]?.detail || 'Square API error' });
+    }
+
+    return respond(200, { ok: true, url: squareData.payment_link.url });
   } catch (err) {
     return respond(500, { ok: false, error: err.message || 'Failed to create checkout' });
   }

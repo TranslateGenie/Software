@@ -129,6 +129,14 @@
       var purchase = JSON.parse(raw);
       var container = document.getElementById('checkoutContent');
 
+      var basePrice = purchase.priceNum || 0;
+      var fee = Math.round(basePrice * 0.05 * 100) / 100;
+      var subtotal = Math.round((basePrice + fee) * 100) / 100;
+
+      function fmtUSD(n) {
+        return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
       container.innerHTML =
         '<span class="checkout-plan-badge">' + purchase.tierName + '</span>' +
         '<h1 style="margin:0 0 0.35rem;">Checkout</h1>' +
@@ -151,8 +159,20 @@
             '<span class="checkout-summary-value">' + purchase.characters + '</span>' +
           '</div>' +
           '<div class="checkout-summary-row" style="margin-top:0.9rem;padding-top:0.75rem;border-top:1px solid var(--line);">' +
-            '<span class="checkout-summary-label" style="font-weight:700;color:var(--ink);">Total</span>' +
-            '<span class="checkout-summary-value" style="font-size:1.1rem;">' + purchase.price + '</span>' +
+            '<span class="checkout-summary-label">License price</span>' +
+            '<span class="checkout-summary-value">' + fmtUSD(basePrice) + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Processing fee (5%)</span>' +
+            '<span class="checkout-summary-value">' + fmtUSD(fee) + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Sales tax</span>' +
+            '<span class="checkout-summary-value" style="color:var(--muted);font-style:italic;">Calculated at checkout</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row" style="margin-top:0.65rem;padding-top:0.65rem;border-top:1px solid var(--line);">' +
+            '<span class="checkout-summary-label" style="font-weight:700;color:var(--ink);">Subtotal</span>' +
+            '<span class="checkout-summary-value" style="font-size:1.1rem;">' + fmtUSD(subtotal) + '</span>' +
           '</div>' +
         '</div>' +
         '<div class="pay-btn-wrap">' +
