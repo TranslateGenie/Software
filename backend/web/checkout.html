@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkout — Translate Genie</title>
+  <link rel="icon" type="image/png" href="Mascot.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .checkout-wrapper {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .checkout-plan-badge {
+      display: inline-block;
+      background: linear-gradient(120deg, var(--brand), var(--brand2));
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 0.28rem 0.85rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+    }
+
+    .checkout-summary {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .checkout-summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .checkout-summary-label {
+      color: var(--muted);
+    }
+
+    .checkout-summary-value {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .checkout-summary-row + .checkout-summary-row {
+      margin-top: 0.55rem;
+    }
+
+    .pay-btn-wrap {
+      margin-top: 1.5rem;
+    }
+
+    .pay-btn-wrap .btn {
+      width: 100%;
+      text-align: center;
+      font-size: 1rem;
+      padding: 0.85rem 1.3rem;
+    }
+
+    .checkout-error {
+      color: #f87171;
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+      min-height: 1.2em;
+      text-align: center;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+  </style>
+
+  <script>
+    (function () {
+      var raw = sessionStorage.getItem('tg_pending_purchase');
+      if (!raw) {
+        window.location.replace('/pricing');
+      }
+    })();
+  </script>
+  <script>window.TG_API_BASE = 'https://6sl2fkurx8.execute-api.us-east-2.amazonaws.com';</script>
+</head>
+<body>
+
+  <nav class="nav">
+    <img src="Mascot.png" alt="Translate Genie" class="nav-logo" />
+    <a href="index.html">Home</a>
+    <a href="pricing.html">Pricing</a>
+    <a href="download.html">Download</a>
+    <a href="news.html">News</a>
+  </nav>
+
+  <main>
+    <div class="checkout-wrapper">
+      <div class="card">
+        <div id="checkoutContent">
+          <!-- populated by JS -->
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="index.html">Home</a>
+      <a href="pricing.html">Pricing</a>
+      <a href="download.html">Download</a>
+      <a href="news.html">News</a>
+      <a href="faq.html">FAQ</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
+    </div>
+    <p class="footer-copy">&copy; 2026 Translate Genie. All rights reserved.</p>
+  </footer>
+
+  <script>
+    var raw = sessionStorage.getItem('tg_pending_purchase');
+    if (!raw) {
+      window.location.replace('/pricing');
+    } else {
+      var purchase = JSON.parse(raw);
+      var container = document.getElementById('checkoutContent');
+
+      container.innerHTML =
+        '<span class="checkout-plan-badge">' + purchase.tierName + '</span>' +
+        '<h1 style="margin:0 0 0.35rem;">Checkout</h1>' +
+        '<p style="margin:0 0 1.5rem;color:var(--muted);font-size:0.9rem;">Review your order, then proceed to secure payment.</p>' +
+        '<div class="checkout-summary">' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Plan</span>' +
+            '<span class="checkout-summary-value">' + purchase.tierName + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Organization</span>' +
+            '<span class="checkout-summary-value">' + purchase.org + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Requests</span>' +
+            '<span class="checkout-summary-value">' + purchase.requests + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row">' +
+            '<span class="checkout-summary-label">Characters</span>' +
+            '<span class="checkout-summary-value">' + purchase.characters + '</span>' +
+          '</div>' +
+          '<div class="checkout-summary-row" style="margin-top:0.9rem;padding-top:0.75rem;border-top:1px solid var(--line);">' +
+            '<span class="checkout-summary-label" style="font-weight:700;color:var(--ink);">Total</span>' +
+            '<span class="checkout-summary-value" style="font-size:1.1rem;">' + purchase.price + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pay-btn-wrap">' +
+          '<button class="btn" id="payNowBtn">Pay Now</button>' +
+          '<p class="checkout-error" id="checkoutError"></p>' +
+          '<p style="text-align:center;font-size:0.75rem;color:var(--muted);margin-top:0.5rem;">You will be taken to Square\'s secure checkout. After payment, your license key will be shown.</p>' +
+        '</div>';
+
+      document.getElementById('payNowBtn').addEventListener('click', function () {
+        var btn = document.getElementById('payNowBtn');
+        var errEl = document.getElementById('checkoutError');
+
+        btn.disabled = true;
+        btn.textContent = 'Preparing checkout…';
+        errEl.textContent = '';
+
+        // TG_API_BASE is set in checkout pages hosted on GitHub Pages.
+        // Empty string falls back to relative URLs (local Express / Electron).
+        var TG_API_BASE = window.TG_API_BASE || '';
+        fetch(TG_API_BASE + '/create-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ org: purchase.org, pack: purchase.pack }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok && data.url) {
+              sessionStorage.removeItem('tg_pending_purchase');
+              window.location.href = data.url;
+            } else {
+              errEl.textContent = data.error || 'Something went wrong. Please try again.';
+              btn.disabled = false;
+              btn.textContent = 'Pay Now';
+            }
+          })
+          .catch(function () {
+            errEl.textContent = 'Network error. Please check your connection and try again.';
+            btn.disabled = false;
+            btn.textContent = 'Pay Now';
+          });
+      });
+    }
+  </script>
+
+</body>
+</html>

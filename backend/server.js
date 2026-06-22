@@ -5,6 +5,7 @@ import { validateLicenseHandler } from './api/validate-license.js';
 import { registerOrgHandler } from './api/register-org.js';
 import { downloadInstallerHandler } from './api/download-installer.js';
 import { squareWebhookHandler } from './api/square-webhook.js';
+import { createCheckoutHandler } from './api/create-checkout.js';
 import {
   translateHandler,
   listTranslationsHandler,
@@ -78,6 +79,7 @@ app.get('/api/license/:key', async (req, res) => {
 app.post('/api/register-org', registerOrgHandler);
 app.get('/api/download-installer', downloadInstallerHandler);
 app.post('/api/square-webhook', squareWebhookHandler);
+app.post('/create-checkout', createCheckoutHandler);
 app.post('/api/translate', translateHandler);
 app.get('/api/translations', listTranslationsHandler);
 app.get('/api/translation/:id', getTranslationHandler);
@@ -121,6 +123,10 @@ app.get('/license', (_req, res) => {
 
 app.get('/download', (_req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'download.html'));
+});
+
+app.get('/checkout', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'web', 'checkout.html'));
 });
 
 const server = app.listen(port, host, () => {

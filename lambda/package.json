@@ -1,0 +1,11 @@
+{
+  "name": "tg-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AWS Lambda functions for Translate Genie public API endpoints",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.775.0",
+    "square": "^44.2.0"
+  }
+}

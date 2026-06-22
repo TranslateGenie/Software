@@ -3,26 +3,146 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>License Delivered</title>
+  <title>License Delivered — Translate Genie</title>
   <link rel="icon" type="image/png" href="Mascot.png" />
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .license-wrapper {
+      max-width: 540px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .license-check {
+      font-size: 2.8rem;
+      margin-bottom: 0.5rem;
+      line-height: 1;
+    }
+
+    .key-box {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 1.25rem 0 0.5rem;
+      text-align: left;
+    }
+
+    .key-text {
+      font-family: "Courier New", "Consolas", monospace;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: 0.05em;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color 0.2s, color 0.2s;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover { border-color: var(--brand); color: var(--ink); }
+    .copy-btn.copied { border-color: #4ade80; color: #4ade80; }
+
+    .key-hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin: 0 0 1.5rem;
+    }
+
+    .license-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .license-actions .btn {
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
+
+  <nav class="nav">
+    <img src="Mascot.png" alt="Translate Genie" class="nav-logo" />
+    <a href="index.html">Home</a>
+    <a href="pricing.html">Pricing</a>
+    <a href="download.html">Download</a>
+    <a href="news.html">News</a>
+  </nav>
+
   <main>
-    <div class="nav">
-      <img src="Mascot.png" alt="Translate Genie Logo" style="height: 40px; margin-right: -1rem; margin-top: -0.75rem;" />
+    <div class="license-wrapper">
+      <div class="card" id="licenseCard">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-links">
       <a href="index.html">Home</a>
       <a href="pricing.html">Pricing</a>
+      <a href="download.html">Download</a>
+      <a href="news.html">News</a>
+      <a href="faq.html">FAQ</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Service</a>
     </div>
-    <section class="card">
-      <h1>Your License</h1>
-      <p>After successful payment, a license key is shown here.</p>
-      <p><strong>Example:</strong> MDAS-DEMO-2026</p>
-      <a class="btn" href="download.html">Download Installer</a>
-      <div>
-        <img src="Logo.png" alt="Pricing Tiers" style="width: 50%; margin-top: 1rem; margin-left: 25%;" />
-      </div>
-    </section>
-  </main>
+    <p class="footer-copy">&copy; 2026 Translate Genie. All rights reserved.</p>
+  </footer>
+
+  <script>
+    var params = new URLSearchParams(window.location.search);
+    var key = params.get('key');
+    var card = document.getElementById('licenseCard');
+
+    if (!key) {
+      card.innerHTML =
+        '<h1>License Not Found</h1>' +
+        '<p>No license key was found in this URL. If you just completed a purchase, please check your email or <a class="href" href="/pricing">contact support</a>.</p>';
+    } else {
+      card.innerHTML =
+        '<div class="license-check">&#10003;</div>' +
+        '<h1 style="margin:0.25rem 0 0.5rem;">Payment Received!</h1>' +
+        '<p style="margin:0 0 0.25rem;">Your license key is ready. Copy it and enter it in the app to activate.</p>' +
+        '<div class="key-box">' +
+          '<span class="key-text" id="keyText">' + key + '</span>' +
+          '<button class="copy-btn" id="copyBtn">Copy</button>' +
+        '</div>' +
+        '<p class="key-hint">Save this key — it is your permanent license. You can re-enter it any time in the app.</p>' +
+        '<div class="license-actions">' +
+          '<a class="btn" href="/download">Download Translate Genie</a>' +
+        '</div>';
+
+      document.getElementById('copyBtn').addEventListener('click', function () {
+        navigator.clipboard.writeText(key).then(function () {
+          var btn = document.getElementById('copyBtn');
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(function () {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 2000);
+        });
+      });
+    }
+  </script>
+
 </body>
 </html>

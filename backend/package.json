@@ -12,6 +12,7 @@
     "@xmldom/xmldom": "^0.9.10",
     "express": "^4.21.2",
     "pdf-parse": "^2.4.5",
-    "pizzip": "^3.2.0"
+    "pizzip": "^3.2.0",
+    "square": "^44.2.0"
   }
 }
