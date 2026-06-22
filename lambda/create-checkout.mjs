@@ -1,4 +1,5 @@
-import { Client, Environment } from 'square';
+import pkg from 'square';
+const { Client, Environment } = pkg;
 import { randomUUID } from 'node:crypto';
 import { loadLicenses, saveLicenses } from './storage.mjs';
 
