@@ -507,6 +507,7 @@ input[readonly] { color: var(--muted); cursor: default; }
   .rating-summary { flex: unset; width: 100%; }
   .hero-preview { width: 90%; }
   .hero-logo { width: 18%; }
+  a.btn, button.btn { font-size: 0.8rem; }
 }
 @media (min-width: 641px) and (max-width: 900px) {
   .carousel-track { grid-template-columns: repeat(2, 1fr); }
