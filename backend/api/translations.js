@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { existsSync } from 'fs';
 import PizZip from 'pizzip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
@@ -300,6 +301,29 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
   return { buffer: Buffer.from(output.join('\n\n'), 'utf8'), characters };
 }
 
+// Maps BCP-47 language codes that need non-Latin glyphs to Windows system fonts.
+// pdfkit's built-in Helvetica only covers Latin-script languages; everything else
+// requires a registered font that actually contains the script's glyphs.
+const SYSTEM_FONT_MAP = [
+  { langs: ['zh-Hant', 'zh-TW', 'zh-HK', 'yue'], path: 'C:\\Windows\\Fonts\\msjh.ttc',     family: 'Microsoft JhengHei' },
+  { langs: ['zh-Hans', 'zh-CN', 'zh-SG', 'zh'],   path: 'C:\\Windows\\Fonts\\msyh.ttc',     family: 'Microsoft YaHei' },
+  { langs: ['ja'],                                  path: 'C:\\Windows\\Fonts\\msgothic.ttc', family: 'MS Gothic' },
+  { langs: ['ko'],                                  path: 'C:\\Windows\\Fonts\\malgun.ttf',   family: null },
+  { langs: ['ar', 'fa', 'ur'],                     path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
+  { langs: ['he'],                                  path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
+  { langs: ['th'],                                  path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
+  { langs: ['hi', 'mr', 'ne'],                     path: 'C:\\Windows\\Fonts\\mangal.ttf',   family: null },
+];
+
+function getSystemFont(targetLanguage) {
+  for (const entry of SYSTEM_FONT_MAP) {
+    if (entry.langs.includes(targetLanguage)) {
+      return existsSync(entry.path) ? entry : null;
+    }
+  }
+  return null;
+}
+
 async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
   // pdf-parse v2 exposes a `PDFParse` class (no default-export function like v1).
   const { PDFParse } = await import('pdf-parse');
@@ -322,16 +346,25 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
-  // Wrap the translated paragraphs in a new PDF document. pdfkit's built-in Helvetica
-  // covers Western European (Latin-script) languages. For CJK / Arabic / Hebrew a
-  // TTF Unicode font would need to be registered via doc.registerFont() first.
   const { default: PDFDocument } = await import('pdfkit');
+  const systemFont = getSystemFont(targetLanguage);
+
   const pdfBuffer = await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 72, compress: false });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
+
+    if (systemFont) {
+      if (systemFont.family) {
+        doc.registerFont('TranslationFont', systemFont.path, systemFont.family);
+      } else {
+        doc.registerFont('TranslationFont', systemFont.path);
+      }
+      doc.font('TranslationFont');
+    }
+
     for (let i = 0; i < translations.length; i++) {
       if (i > 0) doc.moveDown(0.5);
       doc.text(translations[i], { align: 'left', lineGap: 2 });
