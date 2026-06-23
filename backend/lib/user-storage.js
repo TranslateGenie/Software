@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 
 const userDataDir = process.env.MDAS_USER_DATA_DIR
@@ -82,6 +82,16 @@ export async function listTranslationsForLanguage(org, targetLanguage) {
   return metas
     .filter(Boolean)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function clearTranslationsForLanguage(org, targetLanguage) {
+  const metaDir = path.join(userDataDir, 'translations', 'meta', org, targetLanguage);
+  const outDir  = path.join(userDataDir, 'translations', 'output', org, targetLanguage);
+
+  await Promise.all([
+    rm(metaDir, { recursive: true, force: true }),
+    rm(outDir,  { recursive: true, force: true }),
+  ]);
 }
 
 export async function getTranslationFileBuffer(outputKey) {

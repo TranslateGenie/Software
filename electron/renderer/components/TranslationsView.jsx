@@ -27,6 +27,8 @@ export default function TranslationsView({ onStatus }) {
   const [activeLang, setActiveLang] = useState('en');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [alert, setAlert] = useState(null);
 
@@ -56,6 +58,24 @@ export default function TranslationsView({ onStatus }) {
   const handleLangChange = (e) => {
     setActiveLang(e.target.value);
     setFiles([]);
+    setConfirmClear(false);
+  };
+
+  const handleClear = async () => {
+    setClearing(true);
+    setConfirmClear(false);
+    onStatus('Clearing translations…', 'warn');
+    try {
+      await window.mdas.clearTranslations(activeLang);
+      setFiles([]);
+      setLastRefresh(new Date());
+      onStatus('Translations cleared', 'ok');
+    } catch (err) {
+      setAlert({ type: 'error', text: `Clear failed: ${err.message}` });
+      onStatus('Error clearing translations', 'error');
+    } finally {
+      setClearing(false);
+    }
   };
 
   const handleDownload = async (file) => {
@@ -98,10 +118,37 @@ export default function TranslationsView({ onStatus }) {
             <button
               className="btn btn--secondary btn--sm"
               onClick={() => fetchTranslations(activeLang)}
-              disabled={loading}
+              disabled={loading || clearing}
             >
               {loading ? <span className="spinner" /> : '↻ Refresh'}
             </button>
+            {confirmClear ? (
+              <>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Clear all?</span>
+                <button
+                  className="btn btn--danger btn--sm"
+                  onClick={handleClear}
+                  disabled={clearing}
+                >
+                  {clearing ? <span className="spinner" /> : 'Yes, clear'}
+                </button>
+                <button
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => setConfirmClear(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={() => setConfirmClear(true)}
+                disabled={loading || clearing || files.length === 0}
+                title="Delete all locally stored translations for this language"
+              >
+                🗑 Clear
+              </button>
+            )}
           </div>
         </div>
 

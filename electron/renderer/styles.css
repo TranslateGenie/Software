@@ -244,6 +244,21 @@ button {
   font-size: 12px;
 }
 
+.btn--danger {
+  background: #c0392b;
+  color: #fff;
+  border: 1px solid #a93226;
+}
+
+.btn--danger:hover {
+  background: #a93226;
+}
+
+.btn--danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Tabs */
 .tabs {
   display: flex;

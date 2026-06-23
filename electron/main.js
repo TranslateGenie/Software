@@ -745,6 +745,21 @@ ipcMain.handle('translation:listTranslations', async (_event, lang) => {
     : [];
 });
 
+ipcMain.handle('translation:clearTranslations', async (_event, lang) => {
+  const session = await readLicenseSession();
+  if (!session?.token || !session?.org) {
+    throw new Error('A valid license is required.');
+  }
+
+  const resolvedLang = String(lang || '').trim();
+  if (!resolvedLang) throw new Error('lang is required');
+
+  await requestLocalHelper(`/api/translations?lang=${encodeURIComponent(resolvedLang)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${session.token}` },
+  });
+});
+
 /**
  * Download a translated file from local helper/S3 storage.
  * Returns the file content as a base64 string.

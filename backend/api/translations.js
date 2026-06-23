@@ -7,6 +7,7 @@ import {
   listTranslationsForLanguage,
   getTranslationMetadata,
   getTranslationFileBuffer,
+  clearTranslationsForLanguage,
 } from '../lib/user-storage.js';
 import { resolveLicenseFromBearer } from './validate-license.js';
 
@@ -304,52 +305,145 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
 // Chromium's Bidi algorithm lays out Arabic/Hebrew paragraphs correctly.
 const RTL_LANGS = new Set(['ar', 'fa', 'ur', 'he', 'yi', 'dv']);
 
-function buildPdfHtml(translations, targetLanguage) {
+// Accepts structured blocks [{type:'h1'|'h2'|'h3'|'p'|'li', translated:string}].
+// Consecutive 'li' blocks are wrapped in <ul>. CSS sizes each element type relative
+// to a 12pt body so headings appear proportional regardless of source font scale.
+function buildPdfHtml(blocks, targetLanguage) {
   const isRtl = RTL_LANGS.has(targetLanguage.split('-')[0]);
   const dir = isRtl ? 'rtl' : 'ltr';
-  // HTML-escape translated text to prevent stray < > & from breaking the DOM.
   const esc = (s) => String(s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const css = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: sans-serif; font-size: 12pt; line-height: 1.7;
-      color: #000; padding: 72px;
-      direction: ${dir}; unicode-bidi: plaintext;
-    }
-    p { margin-bottom: 0.75em; word-break: break-word; white-space: pre-wrap; }
+    body { font-family: sans-serif; font-size: 12pt; line-height: 1.6; color: #000;
+           padding: 72px; direction: ${dir}; unicode-bidi: plaintext; }
+    h1 { font-size: 20pt; font-weight: bold; margin-bottom: 6pt; }
+    h2 { font-size: 15pt; font-weight: bold; margin-top: 14pt; margin-bottom: 4pt; }
+    h3 { font-size: 13pt; font-weight: bold; margin-top: 10pt; margin-bottom: 3pt; }
+    p  { margin-bottom: 8pt; word-break: break-word; }
+    ul { margin: 0 0 8pt 20pt; }
+    li { margin-bottom: 3pt; }
   `;
-  const body = translations.map((t) => `<p>${esc(t)}</p>`).join('\n');
-  return `<!DOCTYPE html>\n<html lang="${esc(targetLanguage)}" dir="${dir}">\n<head><meta charset="utf-8"><style>${css}</style></head>\n<body>\n${body}\n</body>\n</html>`;
+
+  let body = '';
+  let inList = false;
+  for (const block of blocks) {
+    if (block.type === 'li') {
+      if (!inList) { body += '<ul>\n'; inList = true; }
+      body += `<li>${esc(block.translated)}</li>\n`;
+    } else {
+      if (inList) { body += '</ul>\n'; inList = false; }
+      body += `<${block.type}>${esc(block.translated)}</${block.type}>\n`;
+    }
+  }
+  if (inList) body += '</ul>\n';
+
+  return `<!DOCTYPE html>\n<html lang="${esc(targetLanguage)}" dir="${dir}">\n<head><meta charset="utf-8"><style>${css}</style></head>\n<body>\n${body}</body>\n</html>`;
 }
 
 async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
-  // pdf-parse v2 exposes a `PDFParse` class (no default-export function like v1).
-  const { PDFParse } = await import('pdf-parse');
-  const data = await new PDFParse({ data: inputBuffer }).getText();
+  // Use pdfjs-dist directly (transitive dep of pdf-parse) to access per-item font
+  // size (transform[3]) and y-position — data that pdf-parse's getText() discards.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
-  // Split on blank lines; collapse wrapped lines within each paragraph.
-  // Filter very short fragments (page numbers, headers).
-  const paragraphs = data.text
-    .split(/\n{2,}/)
-    .map((p) => p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter((p) => p.length > 3);
+  const pdfDoc = await pdfjs.getDocument({
+    data: new Uint8Array(inputBuffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
 
-  if (paragraphs.length === 0) return { pdfHtml: null, characters: 0 };
+  const allLines = [];
 
-  const characters = paragraphs.reduce((sum, p) => sum + p.length, 0);
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 1 });
+    const tc = await page.getTextContent();
+
+    // Flip PDF y (bottom-up) to screen y (top-down) for reading-order sorting.
+    const items = tc.items
+      .filter((item) => 'str' in item && item.str.trim())
+      .map((item) => ({
+        str: item.str,
+        x: item.transform[4],
+        y: viewport.height - item.transform[5],
+        h: Math.abs(item.transform[3]) || Math.abs(item.height) || 0,
+      }))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+
+    // Group items within ±3 units vertically into the same line.
+    for (const item of items) {
+      const last = allLines[allLines.length - 1];
+      if (last && last.page === pageNum && Math.abs(item.y - last.y) < 3) {
+        last.items.push(item);
+        last.h = Math.max(last.h, item.h);
+      } else {
+        allLines.push({ y: item.y, h: item.h, page: pageNum, items: [item] });
+      }
+    }
+
+    page.cleanup();
+  }
+
+  await pdfDoc.destroy();
+  if (allLines.length === 0) return { pdfHtml: null, characters: 0 };
+
+  // Sort items within each line left-to-right and join into a single string.
+  for (const line of allLines) {
+    line.items.sort((a, b) => a.x - b.x);
+    line.text = line.items.map((i) => i.str).join('').trim();
+  }
+
+  // Body font size = modal rounded height across all lines.
+  const counts = {};
+  for (const l of allLines) {
+    if (l.h > 0) { const k = Math.round(l.h); counts[k] = (counts[k] || 0) + 1; }
+  }
+  const bodyH = Number(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 12);
+
+  const BULLET = /^[•·∙●○▪▸►→\-\*]\s/;
+
+  const blocks = [];
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
+    if (!line.text) continue;
+
+    const prev = allLines[i - 1];
+    const diffPage = prev && line.page !== prev.page;
+    const gap = (!diffPage && prev) ? (line.y - prev.y) : Infinity;
+    const isParaBreak = diffPage || gap > bodyH * 1.5;
+
+    const ratio = bodyH > 0 ? line.h / bodyH : 1;
+    const type = BULLET.test(line.text) ? 'li'
+      : ratio > 1.5  ? 'h1'
+      : ratio > 1.25 ? 'h2'
+      : ratio > 1.1  ? 'h3'
+      : 'p';
+
+    // Merge consecutive body-text lines into one paragraph unless there's a gap.
+    const last = blocks[blocks.length - 1];
+    if (last && last.type === 'p' && type === 'p' && !isParaBreak) {
+      last.text += ' ' + line.text;
+    } else {
+      blocks.push({ type, text: line.text });
+    }
+  }
+
+  const valid = blocks.filter((b) => b.text.length > 1);
+  if (valid.length === 0) return { pdfHtml: null, characters: 0 };
+
+  const characters = valid.reduce((sum, b) => sum + b.text.length, 0);
   enforceBudget(characters, budget);
 
   const translations = [];
-  for (const chunk of chunkTexts(paragraphs)) {
+  for (const chunk of chunkTexts(valid.map((b) => b.text))) {
     translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
+  for (let i = 0; i < valid.length; i++) {
+    valid[i].translated = translations[i] ?? valid[i].text;
+  }
 
-  // Return HTML string — the Electron main process renders it to a real PDF via
-  // webContents.printToPDF(), which uses Chromium's font fallback and handles
-  // all Unicode scripts (CJK, Arabic, Hebrew, Thai, Devanagari, etc.) without
-  // any manual font registration.
-  return { pdfHtml: buildPdfHtml(translations, targetLanguage), characters };
+  return { pdfHtml: buildPdfHtml(valid, targetLanguage), characters };
 }
 
 async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget) {
@@ -699,6 +793,25 @@ export async function getTranslationHandler(req, res) {
     return res.status(200).json({ ok: true, item: normalizeTranslationMeta(metadata) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Failed to load translation metadata.' });
+  }
+}
+
+export async function clearTranslationsHandler(req, res) {
+  try {
+    const resolved = await resolveLicenseFromBearer(req);
+    if (!resolved.valid || !resolved.record) {
+      return res.status(401).json({ ok: false, error: resolved.reason || 'invalid-license' });
+    }
+
+    const lang = String(req.query.lang || '').trim();
+    if (!lang) {
+      return res.status(400).json({ ok: false, error: 'lang query param is required.' });
+    }
+
+    await clearTranslationsForLanguage(resolved.record.org, lang);
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Failed to clear translations.' });
   }
 }
 

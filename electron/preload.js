@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('mdas', {
   // ── Translation APIs ──────────────────────────────────────────────────────
   uploadFile: (payload) => ipcRenderer.invoke('translation:uploadFile', payload),
   listTranslations: (lang) => ipcRenderer.invoke('translation:listTranslations', lang),
+  clearTranslations: (lang) => ipcRenderer.invoke('translation:clearTranslations', lang),
   downloadFile: (payload) => ipcRenderer.invoke('translation:downloadFile', payload),
   listIncoming: () => ipcRenderer.invoke('translation:listPending'),
 

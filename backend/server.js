@@ -11,6 +11,7 @@ import {
   listTranslationsHandler,
   getTranslationHandler,
   getTranslationFileHandler,
+  clearTranslationsHandler,
 } from './api/translations.js';
 import {
   listBugReportsHandler,
@@ -85,6 +86,7 @@ app.post('/api/square-webhook', squareWebhookHandler);
 app.post('/create-checkout', createCheckoutHandler);
 app.post('/api/translate', translateHandler);
 app.get('/api/translations', listTranslationsHandler);
+app.delete('/api/translations', clearTranslationsHandler);
 app.get('/api/translation/:id', getTranslationHandler);
 app.get('/api/translation/:id/file', getTranslationFileHandler);
 app.get('/api/bug-reports', listBugReportsHandler);
