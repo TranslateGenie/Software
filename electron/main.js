@@ -57,6 +57,7 @@ const ADMIN_PASSWORD = process.env.MDAS_ADMIN_PASSWORD || '';
 let adminUnlocked = false;
 let localHelperProcess = null;
 let appIsQuitting = false;
+let helperRestartCount = 0;
 
 function resolveBackendServerPath() {
   if (app.isPackaged) {
@@ -69,7 +70,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForLocalHelperReady(maxAttempts = 40, intervalMs = 250) {
+async function waitForLocalHelperReady(maxAttempts = 120, intervalMs = 500) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const response = await fetch(`${LICENSE_API_BASE_URL}/health`);
@@ -115,7 +116,12 @@ async function startLocalHelperServer() {
   localHelperProcess.on('exit', (code, signal) => {
     localHelperProcess = null;
     if (!appIsQuitting) {
-      console.error(`Local helper exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'}).`);
+      console.error(`Local helper exited (code=${code ?? 'null'}, signal=${signal ?? 'null'}).`);
+      if (helperRestartCount < 3) {
+        helperRestartCount += 1;
+        console.warn(`Restarting local helper (attempt ${helperRestartCount}/3)…`);
+        sleep(2000).then(() => startLocalHelperServer().catch(console.error));
+      }
     }
   });
 
@@ -376,7 +382,20 @@ function createWindow() {
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  startLocalHelperServer()
+  const launchHelper = async (triesLeft) => {
+    try {
+      await startLocalHelperServer();
+    } catch (err) {
+      if (triesLeft > 0) {
+        console.warn(`Local helper failed to start, retrying… (${triesLeft} left)`);
+        await sleep(3000);
+        return launchHelper(triesLeft - 1);
+      }
+      throw err;
+    }
+  };
+
+  launchHelper(2)
     .then(async () => {
       if (process.env.MDAS_ENV === 'dev') {
         // Auto-inject a dev license session so no activation is needed locally.
