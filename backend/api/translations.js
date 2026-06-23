@@ -292,8 +292,9 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
 }
 
 async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
-  const { default: pdfParse } = await import('pdf-parse');
-  const data = await pdfParse(inputBuffer);
+  // pdf-parse v2 exposes a `PDFParse` class (no default-export function like v1).
+  const { PDFParse } = await import('pdf-parse');
+  const data = await new PDFParse({ data: inputBuffer }).getText();
 
   // Split on blank lines; collapse wrapped lines within each paragraph into a single string.
   // Filters out very short fragments that are likely page numbers or running headers.

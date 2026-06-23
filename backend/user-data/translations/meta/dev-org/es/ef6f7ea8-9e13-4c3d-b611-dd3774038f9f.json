@@ -1,0 +1,13 @@
+{
+  "id": "ef6f7ea8-9e13-4c3d-b611-dd3774038f9f",
+  "org": "dev-org",
+  "targetLanguage": "es",
+  "fileName": "test.txt",
+  "outputKey": "translations/output/dev-org/es/ef6f7ea8-9e13-4c3d-b611-dd3774038f9f/test.txt",
+  "createdAt": "2026-06-23T03:08:14.033Z",
+  "mimeType": "application/pdf",
+  "mode": "pdf-translation",
+  "inputBytes": 614,
+  "outputBytes": 59,
+  "charactersCharged": 52
+}

@@ -1,4 +1,4 @@
-import { Client, Environment } from 'square';
+import { SquareClient, SquareEnvironment } from 'square';
 import { randomUUID } from 'node:crypto';
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
 import { generateUniqueLicenseKey } from '../lib/license-key.js';
@@ -18,11 +18,11 @@ function getSquareClient() {
   if (!squareClient) {
     const token = process.env.SQUARE_ACCESS_TOKEN;
     if (!token) throw new Error('SQUARE_ACCESS_TOKEN is not configured');
-    squareClient = new Client({
-      accessToken: token,
+    squareClient = new SquareClient({
+      token,
       environment: process.env.SQUARE_ENVIRONMENT === 'sandbox'
-        ? Environment.Sandbox
-        : Environment.Production,
+        ? SquareEnvironment.Sandbox
+        : SquareEnvironment.Production,
     });
   }
   return squareClient;
@@ -31,7 +31,7 @@ function getSquareClient() {
 async function getDefaultLocationId() {
   if (cachedLocationId) return cachedLocationId;
   const client = getSquareClient();
-  const { result } = await client.locationsApi.listLocations();
+  const result = await client.locations.list();
   const active = (result.locations || []).filter(l => l.status === 'ACTIVE');
   if (!active.length) throw new Error('No active Square locations found');
   cachedLocationId = active[0].id;
@@ -92,7 +92,7 @@ export async function createCheckoutHandler(req, res) {
     const locationId = await getDefaultLocationId();
     const client = getSquareClient();
 
-    const { result } = await client.checkoutApi.createPaymentLink({
+    const result = await client.checkout.paymentLinks.create({
       idempotencyKey: randomUUID(),
       quickPay: {
         name: config.displayName,
