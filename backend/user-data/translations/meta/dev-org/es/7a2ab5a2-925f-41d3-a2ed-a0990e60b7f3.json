@@ -1,0 +1,13 @@
+{
+  "id": "7a2ab5a2-925f-41d3-a2ed-a0990e60b7f3",
+  "org": "dev-org",
+  "targetLanguage": "es",
+  "fileName": "big.bin",
+  "outputKey": "translations/output/dev-org/es/7a2ab5a2-925f-41d3-a2ed-a0990e60b7f3/big.bin",
+  "createdAt": "2026-06-23T03:37:18.706Z",
+  "mimeType": "application/octet-stream",
+  "mode": "binary-pass-through",
+  "inputBytes": 55050240,
+  "outputBytes": 55050240,
+  "charactersCharged": 0
+}

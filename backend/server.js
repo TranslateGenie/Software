@@ -42,8 +42,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+// Documents are sent as base64 in the JSON body, which inflates the on-disk size by ~33%.
+// This is a localhost-only helper serving a single desktop user, so a generous cap is safe
+// and avoids rejecting large (image-heavy) PDFs/Office files as "request entity too large".
+app.use(express.json({ limit: '250mb' }));
+app.use(express.urlencoded({ extended: false, limit: '250mb' }));
 app.use(express.static(path.join(__dirname, 'web')));
 app.use('/site', express.static(path.join(__dirname, 'web')));
 
