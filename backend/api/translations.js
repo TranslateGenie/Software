@@ -357,12 +357,23 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     doc.on('error', reject);
 
     if (systemFont) {
-      if (systemFont.family) {
-        doc.registerFont('TranslationFont', systemFont.path, systemFont.family);
-      } else {
-        doc.registerFont('TranslationFont', systemFont.path);
+      // Try family name first (required for TTC collections); fall back to
+      // path-only (picks first font in collection) if the name lookup fails.
+      try {
+        doc.registerFont('TranslationFont',
+          systemFont.path,
+          systemFont.family ?? undefined,
+        );
+        doc.font('TranslationFont');
+      } catch {
+        try {
+          doc.registerFont('TranslationFont', systemFont.path);
+          doc.font('TranslationFont');
+        } catch {
+          // Leave pdfkit on its default Helvetica; glyphs will be wrong but
+          // the PDF won't crash.
+        }
       }
-      doc.font('TranslationFont');
     }
 
     for (let i = 0; i < translations.length; i++) {
