@@ -7,7 +7,7 @@ $outDir = Join-Path $PSScriptRoot 'dist'
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory $outDir | Out-Null
 
-$shared = @('storage.mjs', 'package.json', 'node_modules')
+$shared = @('storage.mjs', 'license-key.mjs', 'package.json', 'node_modules')
 $functions = @('create-checkout', 'square-webhook')
 
 foreach ($fn in $functions) {
