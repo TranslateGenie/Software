@@ -248,6 +248,10 @@
         <p>Each pack includes translation requests and character capacity. Access ends when either limit is reached. Taxes not included.</p>
       </div>
 
+      <div id="renewBanner" style="display:none;background:rgba(13,76,148,0.12);border:1px solid var(--brand);border-radius:12px;padding:0.85rem 1.1rem;margin-bottom:1.25rem;font-size:0.88rem;color:var(--ink);text-align:center;">
+        Renewing license <strong id="renewKeyLabel" style="font-family:monospace;"></strong> — pick a pack to add credits to your existing key.
+      </div>
+
       <div class="license-options-card">
         <p class="license-options-title">Select a plan to get started</p>
         <div class="license-cards">
@@ -303,7 +307,7 @@
   <div class="modal-backdrop" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-card">
       <h2 class="modal-title" id="modalTitle">Complete Your Purchase</h2>
-      <p style="color:var(--muted);font-size:0.85rem;margin:0 0 0.25rem;">Review your selected plan and enter your organization name.</p>
+      <p id="modalSubtitle" style="color:var(--muted);font-size:0.85rem;margin:0 0 0.25rem;">Review your selected plan and enter your organization name.</p>
 
       <div class="modal-plan-summary">
         <div class="modal-plan-row">
@@ -313,7 +317,7 @@
         <div class="modal-plan-limits" id="modalPlanLimits"></div>
       </div>
 
-      <div class="modal-field">
+      <div class="modal-field" id="orgField">
         <label for="orgNameInput">Organization Name</label>
         <input type="text" id="orgNameInput" placeholder="e.g. Acme Corp" autocomplete="organization" />
         <div class="modal-error" id="orgNameError" aria-live="polite"></div>
@@ -348,6 +352,18 @@
     const orgNameError = document.getElementById('orgNameError');
     const checkoutBtn = document.getElementById('checkoutBtn');
     const cancelBtn = document.getElementById('cancelBtn');
+    const orgField = document.getElementById('orgField');
+    const modalSubtitle = document.getElementById('modalSubtitle');
+
+    // Renewal mode: the desktop app opens this page as ?renew=<existing key> so a purchase
+    // tops up that key instead of issuing a new one. Org isn't needed — it's already on record.
+    const RENEW_KEY = (new URLSearchParams(window.location.search).get('renew') || '').trim();
+    if (RENEW_KEY) {
+      document.getElementById('renewKeyLabel').textContent = RENEW_KEY;
+      document.getElementById('renewBanner').style.display = 'block';
+      orgField.style.display = 'none';
+      modalSubtitle.textContent = 'Pick a pack to add credits to your existing license.';
+    }
 
     let selectedPlan = null;
 
@@ -369,7 +385,7 @@
         orgNameInput.value = '';
         orgNameError.textContent = '';
         modal.classList.add('open');
-        orgNameInput.focus();
+        if (!RENEW_KEY) orgNameInput.focus();
       });
     });
 
@@ -390,7 +406,8 @@
 
     checkoutBtn.addEventListener('click', function() {
       var org = orgNameInput.value.trim();
-      if (!org) {
+      // Org is required for a new purchase, but not for a renewal (we already have the record).
+      if (!RENEW_KEY && !org) {
         orgNameError.textContent = 'Please enter your organization name.';
         orgNameInput.focus();
         return;
@@ -400,6 +417,7 @@
 
       sessionStorage.setItem('tg_pending_purchase', JSON.stringify({
         org: org,
+        renewKey: RENEW_KEY || '',
         tierName: selectedPlan.name,
         price: selectedPlan.price,
         priceNum: selectedPlan.priceNum,

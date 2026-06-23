@@ -42,17 +42,19 @@ function respond(statusCode, body) {
 }
 
 export const handler = async (event) => {
-  let org, pack;
+  let org, pack, renewKey;
   try {
     const body = JSON.parse(event.body || '{}');
     org = body.org;
     pack = body.pack;
+    renewKey = (body.key || '').trim();
   } catch {
     return respond(400, { ok: false, error: 'Invalid JSON body' });
   }
 
-  if (!org || !pack) {
-    return respond(400, { ok: false, error: 'org and pack are required' });
+  // org is only required for a brand-new purchase; a renewal reuses the existing record's org.
+  if (!pack || (!org && !renewKey)) {
+    return respond(400, { ok: false, error: 'pack and org are required' });
   }
 
   const config = PACK_CONFIG[pack];
@@ -66,23 +68,34 @@ export const handler = async (event) => {
       return respond(500, { ok: false, error: 'licenses.json must be an array' });
     }
 
-    // Generate a key that does not collide with any existing key (valid or not).
-    const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
-    const key = generateUniqueLicenseKey(existingKeys);
+    // Renewal if a known key was supplied; otherwise a brand-new purchase.
+    const existingRecord = renewKey ? licenses.find((l) => l?.key === renewKey) : null;
+
+    let key;
+    if (existingRecord) {
+      // Renewal: reuse the key as-is. The webhook will add credits on payment, so we don't
+      // touch licenses.json here (no new record, no save).
+      key = existingRecord.key;
+    } else {
+      // New purchase: mint a unique key and write a pending record the webhook will activate.
+      const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
+      key = generateUniqueLicenseKey(existingKeys);
+      licenses.push({
+        org,
+        type: config.tier,
+        requests: 0,
+        limit: 0,
+        characters: 0,
+        charLimit: 0,
+        key,
+        valid: false,
+      });
+      await saveLicenses(licenses);
+    }
+
     const siteUrl = process.env.SITE_URL || 'https://translategenie.github.io';
     const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
-
-    licenses.push({
-      org,
-      type: config.tier,
-      requests: 0,
-      limit: 0,
-      characters: 0,
-      charLimit: 0,
-      key,
-      valid: false,
-    });
-    await saveLicenses(licenses);
+    const noteOrg = org || existingRecord?.org || '';
 
     const locationId = await getDefaultLocationId();
 
@@ -100,7 +113,7 @@ export const handler = async (event) => {
           redirect_url: redirectUrl,
           merchant_support_email: 'support@translategenie.com',
         },
-        payment_note: `org:${org}|pack:${pack}|key:${key}`,
+        payment_note: `org:${noteOrg}|pack:${pack}|key:${key}`,
       }),
     });
 

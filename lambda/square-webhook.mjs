@@ -1,11 +1,11 @@
 import { loadLicenses, saveLicenses } from './storage.mjs';
 
 const PACK_INCREMENTS = {
-  'one-wish': { requests: 10, characters: 200000 },
-  starter:    { requests: 100, characters: 2000000 },
-  small:      { requests: 500, characters: 10000000 },
-  medium:     { requests: 2000, characters: 40000000 },
-  enterprise: { requests: 10000, characters: 200000000 },
+  'one-wish': { requests: 10, characters: 200000, tier: 'T1' },
+  starter:    { requests: 100, characters: 2000000, tier: 'T1' },
+  small:      { requests: 500, characters: 10000000, tier: 'T1' },
+  medium:     { requests: 2000, characters: 40000000, tier: 'T2' },
+  enterprise: { requests: 10000, characters: 200000000, tier: 'T3' },
 };
 
 function respond(statusCode, body) {
@@ -60,9 +60,13 @@ export const handler = async (event) => {
         return respond(404, { ok: false, error: `License not found: ${licenseKey}` });
       }
 
+      // Add credits on top of whatever the license already has. For a brand-new license the
+      // pending record starts at 0, so 0 + pack == the pack amount; for a renewal the new
+      // pack stacks onto the remaining balance. Used counters are left untouched.
       licenses[index].valid = true;
-      licenses[index].limit = increment.requests;
-      licenses[index].charLimit = increment.characters;
+      licenses[index].limit = Number(licenses[index].limit || 0) + increment.requests;
+      licenses[index].charLimit = Number(licenses[index].charLimit || 0) + increment.characters;
+      licenses[index].type = increment.tier;
 
       await saveLicenses(licenses);
       return respond(200, { ok: true, key: licenseKey, eventType });

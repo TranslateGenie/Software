@@ -169,7 +169,15 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
         </p>
         {quotaReached && (
           <div className="alert alert--error" style={{ marginBottom: 12 }}>
-            Your translation quota has been reached. Please purchase additional request packs.
+            <div style={{ marginBottom: 8 }}>
+              Your translation quota has been reached. Renew your license to add more credits to the same key.
+            </div>
+            <button
+              className="btn btn--primary"
+              onClick={() => window.mdas.openPricingPage()}
+            >
+              Renew License
+            </button>
           </div>
         )}
 

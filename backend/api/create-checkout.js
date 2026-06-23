@@ -40,9 +40,11 @@ async function getDefaultLocationId() {
 
 export async function createCheckoutHandler(req, res) {
   const { org, pack } = req.body || {};
+  const renewKey = (req.body?.key || '').trim();
 
-  if (!org || !pack) {
-    return res.status(400).json({ ok: false, error: 'org and pack are required' });
+  // org is only required for a brand-new purchase; a renewal reuses the existing record's org.
+  if (!pack || (!org && !renewKey)) {
+    return res.status(400).json({ ok: false, error: 'pack and org are required' });
   }
 
   const config = PACK_CONFIG[pack];
@@ -51,30 +53,40 @@ export async function createCheckoutHandler(req, res) {
   }
 
   try {
-    // Write pending license — limits are zeroed until webhook activates it on payment
     const { json: licenses, etag } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });
     }
 
-    // Generate a key that does not collide with any existing key (valid or not).
-    const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
-    const key = generateUniqueLicenseKey(existingKeys);
+    // Renewal if a known key was supplied; otherwise a brand-new purchase.
+    const existingRecord = renewKey ? licenses.find((l) => l?.key === renewKey) : null;
+
+    let key;
+    if (existingRecord) {
+      // Renewal: reuse the key as-is. The webhook adds credits on payment, so we don't
+      // touch licenses.json here (no new record, no save).
+      key = existingRecord.key;
+    } else {
+      // New purchase: mint a unique key and write a pending record the webhook will activate.
+      const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
+      key = generateUniqueLicenseKey(existingKeys);
+      licenses.push({
+        org,
+        type: config.tier,
+        requests: 0,
+        limit: 0,
+        characters: 0,
+        charLimit: 0,
+        key,
+        valid: false,
+      });
+      await saveLicenses(licenses, etag, `pending purchase ${key}`);
+    }
+
     const port = process.env.LOCAL_HELPER_PORT || 8787;
     const siteUrl = process.env.SITE_URL || `http://127.0.0.1:${port}`;
     const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
-
-    licenses.push({
-      org,
-      type: config.tier,
-      requests: 0,
-      limit: 0,
-      characters: 0,
-      charLimit: 0,
-      key,
-      valid: false,
-    });
-    await saveLicenses(licenses, etag, `pending purchase ${key}`);
+    const noteOrg = org || existingRecord?.org || '';
 
     // Create Square payment link
     const locationId = await getDefaultLocationId();
@@ -91,7 +103,7 @@ export async function createCheckoutHandler(req, res) {
         redirectUrl,
         merchantSupportEmail: 'support@translategenie.com',
       },
-      paymentNote: `org:${org}|pack:${pack}|key:${key}`,
+      paymentNote: `org:${noteOrg}|pack:${pack}|key:${key}`,
     });
 
     return res.json({ ok: true, url: result.paymentLink.url });

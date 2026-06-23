@@ -130,6 +130,7 @@
       var purchase = JSON.parse(raw);
       var container = document.getElementById('checkoutContent');
 
+      var isRenewal = !!purchase.renewKey;
       var basePrice = purchase.priceNum || 0;
       var fee = Math.round(basePrice * 0.05 * 100) / 100;
       var subtotal = Math.round((basePrice + fee) * 100) / 100;
@@ -139,25 +140,31 @@
       }
 
       container.innerHTML =
-        '<span class="checkout-plan-badge">' + purchase.tierName + '</span>' +
+        '<span class="checkout-plan-badge">' + (isRenewal ? 'Renewal · ' : '') + purchase.tierName + '</span>' +
         '<h1 style="margin:0 0 0.35rem;">Checkout</h1>' +
-        '<p style="margin:0 0 1.5rem;color:var(--muted);font-size:0.9rem;">Review your order, then proceed to secure payment.</p>' +
+        '<p style="margin:0 0 1.5rem;color:var(--muted);font-size:0.9rem;">' +
+          (isRenewal
+            ? 'These credits will be added to your existing license.'
+            : 'Review your order, then proceed to secure payment.') +
+        '</p>' +
         '<div class="checkout-summary">' +
           '<div class="checkout-summary-row">' +
             '<span class="checkout-summary-label">Plan</span>' +
             '<span class="checkout-summary-value">' + purchase.tierName + '</span>' +
           '</div>' +
           '<div class="checkout-summary-row">' +
-            '<span class="checkout-summary-label">Organization</span>' +
-            '<span class="checkout-summary-value">' + purchase.org + '</span>' +
+            '<span class="checkout-summary-label">' + (isRenewal ? 'Renewing license' : 'Organization') + '</span>' +
+            '<span class="checkout-summary-value"' + (isRenewal ? ' style="font-family:monospace;"' : '') + '>' +
+              (isRenewal ? purchase.renewKey : purchase.org) +
+            '</span>' +
           '</div>' +
           '<div class="checkout-summary-row">' +
-            '<span class="checkout-summary-label">Requests</span>' +
-            '<span class="checkout-summary-value">' + purchase.requests + '</span>' +
+            '<span class="checkout-summary-label">' + (isRenewal ? 'Requests added' : 'Requests') + '</span>' +
+            '<span class="checkout-summary-value">' + (isRenewal ? '+' : '') + purchase.requests + '</span>' +
           '</div>' +
           '<div class="checkout-summary-row">' +
-            '<span class="checkout-summary-label">Characters</span>' +
-            '<span class="checkout-summary-value">' + purchase.characters + '</span>' +
+            '<span class="checkout-summary-label">' + (isRenewal ? 'Characters added' : 'Characters') + '</span>' +
+            '<span class="checkout-summary-value">' + (isRenewal ? '+' : '') + purchase.characters + '</span>' +
           '</div>' +
           '<div class="checkout-summary-row" style="margin-top:0.9rem;padding-top:0.75rem;border-top:1px solid var(--line);">' +
             '<span class="checkout-summary-label">License price</span>' +
@@ -191,10 +198,12 @@
         errEl.textContent = '';
 
         var checkoutUrl = window.TG_CHECKOUT_URL || '/create-checkout';
+        var payload = { org: purchase.org, pack: purchase.pack };
+        if (purchase.renewKey) payload.key = purchase.renewKey;
         fetch(checkoutUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org: purchase.org, pack: purchase.pack }),
+          body: JSON.stringify(payload),
         })
           .then(function (r) { return r.json(); })
           .then(function (data) {

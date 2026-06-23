@@ -546,8 +546,14 @@ ipcMain.handle('shell:openPath', async (_event, filePath) => {
 });
 
 ipcMain.handle('app:openPricingPage', async () => {
-  await shell.openExternal(PRICING_PAGE_URL);
-  return { ok: true, url: PRICING_PAGE_URL };
+  // If we already hold a license key, open pricing in renewal mode so a purchase tops up that
+  // key (adds credits) instead of issuing a brand-new one. New users have no cached key.
+  const cachedKey = await readCachedLicenseKey();
+  const url = cachedKey
+    ? `${PRICING_PAGE_URL}?renew=${encodeURIComponent(cachedKey)}`
+    : PRICING_PAGE_URL;
+  await shell.openExternal(url);
+  return { ok: true, url };
 });
 
 ipcMain.handle('admin:login', async (_event, password) => {
