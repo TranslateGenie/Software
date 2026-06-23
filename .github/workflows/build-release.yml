@@ -67,6 +67,26 @@ jobs:
             echo "MDAS_ADMIN_PASSWORD=${S_MDAS_ADMIN_PASSWORD}"
           } > electron/.env
 
+      - name: Stamp version from tag
+        shell: pwsh
+        run: |
+          # Derive the release version and write it into electron/package.json so
+          # electron-builder stamps it into the installer and latest.yml. The tag
+          # is the single source of truth — without this, the build always ships
+          # the hardcoded package.json version and clients never see an update.
+          $ver = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($ver)) {
+            if ("${{ github.ref_type }}" -eq "tag") {
+              $ver = "${{ github.ref_name }}"
+            } else {
+              $ver = "0.0.${{ github.run_number }}"
+            }
+          }
+          # electron-builder wants a bare semver (no leading "v").
+          $ver = $ver.TrimStart('v','V')
+          Write-Output "Stamping version: $ver"
+          npm version $ver --no-git-tag-version --allow-same-version --prefix electron
+
       - name: Build Electron app
         run: npm run build --prefix electron
         env:
@@ -156,12 +176,26 @@ jobs:
             Write-Error "No .exe files found in electron/dist"
             exit 1
           }
-          
+
           $installer = $installers[0]
           Write-Output "Uploading installer: $($installer.FullName)"
-          
+
           # Upload using Electron Builder's native filename.
           gh release upload "${{ steps.meta.outputs.tag_name }}" "$($installer.FullName)" --clobber
+
+          # Upload the auto-update metadata that electron-updater needs to detect
+          # new versions: latest.yml plus the installer's .blockmap (used for
+          # differential downloads). Without latest.yml, "Check Updates" 404s.
+          $updateFiles = Get-ChildItem -Path "electron/dist" -File |
+            Where-Object { $_.Name -eq 'latest.yml' -or $_.Name -like '*.blockmap' }
+          if (-not ($updateFiles | Where-Object { $_.Name -eq 'latest.yml' })) {
+            Write-Error "latest.yml not found in electron/dist — auto-update feed would be incomplete"
+            exit 1
+          }
+          foreach ($f in $updateFiles) {
+            Write-Output "Uploading update metadata: $($f.Name)"
+            gh release upload "${{ steps.meta.outputs.tag_name }}" "$($f.FullName)" --clobber
+          }
 
           $installerName = $installer.Name
           $installerUrl = "https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag_name }}/$installerName"

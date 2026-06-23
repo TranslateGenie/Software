@@ -423,10 +423,28 @@ app.on('window-all-closed', () => {
 
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.logger = null;
+// Keep update errors visible in the packaged app's logs so failures are diagnosable.
+autoUpdater.logger = console;
 
 function sendUpdateStatus(status, message = '', percent = 0) {
   mainWindow?.webContents?.send('app:updateStatus', { status, message, percent });
+}
+
+/**
+ * electron-updater raises an `error` event when the GitHub releases feed has no
+ * published release yet (or no matching `latest.yml`). That surfaces as a 404,
+ * which is not a real failure — it just means there's nothing newer to install.
+ * Treat it as "up to date" instead of a hard "Update Failed".
+ */
+function isNoReleaseError(err) {
+  const text = `${err?.message || ''} ${err?.stack || ''}`.toLowerCase();
+  return (
+    text.includes('404') ||
+    text.includes('no published versions') ||
+    text.includes('latest.yml') ||
+    text.includes('cannot find') ||
+    text.includes('unable to find latest version')
+  );
 }
 
 autoUpdater.on('checking-for-update', () => sendUpdateStatus('checking'));
@@ -434,14 +452,25 @@ autoUpdater.on('update-available', (info) => sendUpdateStatus('available', `v${i
 autoUpdater.on('update-not-available', () => sendUpdateStatus('up-to-date'));
 autoUpdater.on('download-progress', (p) => sendUpdateStatus('downloading', '', Math.round(p.percent)));
 autoUpdater.on('update-downloaded', () => sendUpdateStatus('ready'));
-autoUpdater.on('error', (err) => sendUpdateStatus('error', err.message));
+autoUpdater.on('error', (err) => {
+  console.error('[auto-updater] error:', err);
+  if (isNoReleaseError(err)) {
+    sendUpdateStatus('up-to-date', 'No updates available.');
+  } else {
+    sendUpdateStatus('error', err?.message || 'Update check failed.');
+  }
+});
 
 ipcMain.handle('app:checkForUpdates', () => {
   if (!app.isPackaged) {
     sendUpdateStatus('up-to-date', 'Update checks only run in packaged builds.');
     return;
   }
-  autoUpdater.checkForUpdates();
+  // The `error` event handles failures; catch the promise too so a rejection
+  // here doesn't become an unhandled rejection.
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.error('[auto-updater] checkForUpdates rejected:', err);
+  });
 });
 
 ipcMain.handle('app:installUpdate', () => {
