@@ -1,0 +1,13 @@
+{
+  "id": "675cbd13-c13f-4c46-b6e9-798cc3f3885d",
+  "org": "dev-org",
+  "targetLanguage": "es",
+  "fileName": "test.docx",
+  "outputKey": "translations/output/dev-org/es/675cbd13-c13f-4c46-b6e9-798cc3f3885d/test.docx",
+  "createdAt": "2026-06-23T04:52:57.426Z",
+  "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "mode": "docx-translation",
+  "inputBytes": 660,
+  "outputBytes": 681,
+  "charactersCharged": 49
+}

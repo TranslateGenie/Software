@@ -1,0 +1,13 @@
+{
+  "id": "a3781362-ef42-4044-9450-9fe97a23c4ea",
+  "org": "dev-org",
+  "targetLanguage": "es",
+  "fileName": "test.pdf",
+  "outputKey": "translations/output/dev-org/es/a3781362-ef42-4044-9450-9fe97a23c4ea/test.pdf",
+  "createdAt": "2026-06-23T04:52:58.080Z",
+  "mimeType": "application/pdf",
+  "mode": "pdf-translation",
+  "inputBytes": 601,
+  "outputBytes": 1372,
+  "charactersCharged": 39
+}

@@ -122,7 +122,16 @@ const XLSX_CFG = { ns: 'http://schemas.openxmlformats.org/spreadsheetml/2006/mai
 // not the run markup) — that is what the customer is charged for.
 async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguage, budget) {
   const { ns, prefix, paraTag, runTag, rPrTag, textTag } = config;
-  const parser = new DOMParser();
+  // @xmldom/xmldom ≥ 0.9 throws (not just warns) when an XML declaration isn't the
+  // very first byte — triggered by a UTF-8 BOM that some OOXML generators prepend.
+  // onError: return silently to continue parsing; throw to abort. Suppress the xml
+  // declaration position issue but let real fatal errors propagate.
+  const parser = new DOMParser({
+    onError: (level, msg) => {
+      if (String(msg).includes('xml declaration')) return;
+      if (level === 'fatalError') throw new Error(String(msg));
+    },
+  });
   const serializer = new XMLSerializer();
   const qual = (tag) => (prefix ? `${prefix}:${tag}` : tag);
   const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -141,7 +150,7 @@ async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguag
     return r;
   };
 
-  const docs = xmlParts.map((xmlStr) => parser.parseFromString(xmlStr, 'application/xml'));
+  const docs = xmlParts.map((xmlStr) => parser.parseFromString(xmlStr.replace(/^﻿/, ''), 'application/xml'));
   const jobs = [];
   let characters = 0;
 
@@ -303,7 +312,7 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     .map((p) => p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
     .filter((p) => p.length > 3);
 
-  if (paragraphs.length === 0) return { buffer: Buffer.from(data.text, 'utf8'), characters: 0 };
+  if (paragraphs.length === 0) return { buffer: inputBuffer, characters: 0 };
 
   const characters = paragraphs.reduce((sum, p) => sum + p.length, 0);
   enforceBudget(characters, budget);
@@ -313,7 +322,24 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
-  return { buffer: Buffer.from(translations.join('\n\n'), 'utf8'), characters };
+  // Wrap the translated paragraphs in a new PDF document. pdfkit's built-in Helvetica
+  // covers Western European (Latin-script) languages. For CJK / Arabic / Hebrew a
+  // TTF Unicode font would need to be registered via doc.registerFont() first.
+  const { default: PDFDocument } = await import('pdfkit');
+  const pdfBuffer = await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 72, compress: false });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    for (let i = 0; i < translations.length; i++) {
+      if (i > 0) doc.moveDown(0.5);
+      doc.text(translations[i], { align: 'left', lineGap: 2 });
+    }
+    doc.end();
+  });
+
+  return { buffer: pdfBuffer, characters };
 }
 
 async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget) {
@@ -544,7 +570,6 @@ export async function translateHandler(req, res) {
           mode = 'xlsx-translation';
         } else if (isPdf) {
           ({ buffer: outputBuffer, characters: charactersCharged } = await translatePdf(inputBuffer, targetLanguage, fromLanguage, budget));
-          outputFileName = fileName.replace(/\.pdf$/i, '.txt');
           mode = 'pdf-translation';
         } else if (isSrt) {
           ({ buffer: outputBuffer, characters: charactersCharged } = await translateSrt(inputBuffer, targetLanguage, fromLanguage, budget));
