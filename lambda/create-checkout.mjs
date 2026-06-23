@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadLicenses, saveLicenses } from './storage.mjs';
+import { generateUniqueLicenseKey } from './license-key.mjs';
 
 const SQUARE_API = 'https://connect.squareup.com/v2';
 const SQUARE_VERSION = '2024-10-17';
@@ -11,12 +12,6 @@ const PACK_CONFIG = {
   'medium':     { amountCents: 125000, requests: 2000,  characters: 40000000,  displayName: 'Genie Sidekick',  tier: 'T2' },
   'enterprise': { amountCents: 500000, requests: 10000, characters: 200000000, displayName: 'Genie Companion', tier: 'T3' },
 };
-
-function generateLicenseKey(org) {
-  const root = (org || 'TGEN').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 4) || 'TGEN';
-  const rand = () => Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${root}-${rand()}-${rand()}-${rand()}`;
-}
 
 function squareHeaders() {
   return {
@@ -65,15 +60,17 @@ export const handler = async (event) => {
     return respond(400, { ok: false, error: `Unknown pack: ${pack}` });
   }
 
-  const key = generateLicenseKey(org);
-  const siteUrl = process.env.SITE_URL || 'https://translategenie.github.io';
-  const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
-
   try {
     const { json: licenses } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return respond(500, { ok: false, error: 'licenses.json must be an array' });
     }
+
+    // Generate a key that does not collide with any existing key (valid or not).
+    const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
+    const key = generateUniqueLicenseKey(existingKeys);
+    const siteUrl = process.env.SITE_URL || 'https://translategenie.github.io';
+    const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
 
     licenses.push({
       org,

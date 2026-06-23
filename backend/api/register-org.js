@@ -1,4 +1,5 @@
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
+import { generateUniqueLicenseKey } from '../lib/license-key.js';
 
 const TIER_CONFIG = {
   T1: { userRange: '1-20', requestLimit: 500, charLimit: 10000000 },
@@ -12,12 +13,6 @@ function resolveTierByUserCount(userCount) {
   if (count <= 20) return 'T1';
   if (count <= 100) return 'T2';
   return 'T3';
-}
-
-function generateLicenseKey(org) {
-  const root = (org || 'ORG').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 4) || 'MDAS';
-  const rand = () => Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${root}-${rand()}-${rand()}-${rand()}`;
 }
 
 export async function registerOrgHandler(req, res) {
@@ -44,7 +39,9 @@ export async function registerOrgHandler(req, res) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });
     }
 
-    const key = generateLicenseKey(org);
+    // Generate a key that does not collide with any existing key (valid or not).
+    const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
+    const key = generateUniqueLicenseKey(existingKeys);
     const newRecord = {
       org,
       type: tierType,

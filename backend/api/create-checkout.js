@@ -1,6 +1,7 @@
 import { Client, Environment } from 'square';
 import { randomUUID } from 'node:crypto';
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
+import { generateUniqueLicenseKey } from '../lib/license-key.js';
 
 const PACK_CONFIG = {
   'one-wish':   { amountCents: 1000n,   requests: 10,    characters: 200000,    displayName: 'One Wish',        tier: 'T1' },
@@ -9,12 +10,6 @@ const PACK_CONFIG = {
   'medium':     { amountCents: 125000n, requests: 2000,  characters: 40000000,  displayName: 'Genie Sidekick',  tier: 'T2' },
   'enterprise': { amountCents: 500000n, requests: 10000, characters: 200000000, displayName: 'Genie Companion', tier: 'T3' },
 };
-
-function generateLicenseKey(org) {
-  const root = (org || 'TGEN').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 4) || 'TGEN';
-  const rand = () => Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${root}-${rand()}-${rand()}-${rand()}`;
-}
 
 let squareClient = null;
 let cachedLocationId = null;
@@ -55,17 +50,20 @@ export async function createCheckoutHandler(req, res) {
     return res.status(400).json({ ok: false, error: `Unknown pack: ${pack}` });
   }
 
-  const key = generateLicenseKey(org);
-  const port = process.env.LOCAL_HELPER_PORT || 8787;
-  const siteUrl = process.env.SITE_URL || `http://127.0.0.1:${port}`;
-  const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
-
   try {
     // Write pending license — limits are zeroed until webhook activates it on payment
     const { json: licenses, etag } = await loadLicenses();
     if (!Array.isArray(licenses)) {
       return res.status(500).json({ ok: false, error: 'licenses.json must be an array' });
     }
+
+    // Generate a key that does not collide with any existing key (valid or not).
+    const existingKeys = new Set(licenses.map((l) => l?.key).filter(Boolean));
+    const key = generateUniqueLicenseKey(existingKeys);
+    const port = process.env.LOCAL_HELPER_PORT || 8787;
+    const siteUrl = process.env.SITE_URL || `http://127.0.0.1:${port}`;
+    const redirectUrl = `${siteUrl}/license?key=${encodeURIComponent(key)}`;
+
     licenses.push({
       org,
       type: config.tier,
