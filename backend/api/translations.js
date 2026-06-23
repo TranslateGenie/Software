@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto';
-import { existsSync } from 'fs';
 import PizZip from 'pizzip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { loadLicenses, saveLicenses } from '../lib/storage.js';
@@ -301,27 +300,27 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
   return { buffer: Buffer.from(output.join('\n\n'), 'utf8'), characters };
 }
 
-// Maps BCP-47 language codes that need non-Latin glyphs to Windows system fonts.
-// pdfkit's built-in Helvetica only covers Latin-script languages; everything else
-// requires a registered font that actually contains the script's glyphs.
-const SYSTEM_FONT_MAP = [
-  { langs: ['zh-Hant', 'zh-TW', 'zh-HK', 'yue'], path: 'C:\\Windows\\Fonts\\msjh.ttc',     family: 'Microsoft JhengHei' },
-  { langs: ['zh-Hans', 'zh-CN', 'zh-SG', 'zh'],   path: 'C:\\Windows\\Fonts\\msyh.ttc',     family: 'Microsoft YaHei' },
-  { langs: ['ja'],                                  path: 'C:\\Windows\\Fonts\\msgothic.ttc', family: 'MS Gothic' },
-  { langs: ['ko'],                                  path: 'C:\\Windows\\Fonts\\malgun.ttf',   family: null },
-  { langs: ['ar', 'fa', 'ur'],                     path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
-  { langs: ['he'],                                  path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
-  { langs: ['th'],                                  path: 'C:\\Windows\\Fonts\\tahoma.ttf',   family: null },
-  { langs: ['hi', 'mr', 'ne'],                     path: 'C:\\Windows\\Fonts\\mangal.ttf',   family: null },
-];
+// RTL script language codes — used to set dir="rtl" on the HTML output so
+// Chromium's Bidi algorithm lays out Arabic/Hebrew paragraphs correctly.
+const RTL_LANGS = new Set(['ar', 'fa', 'ur', 'he', 'yi', 'dv']);
 
-function getSystemFont(targetLanguage) {
-  for (const entry of SYSTEM_FONT_MAP) {
-    if (entry.langs.includes(targetLanguage)) {
-      return existsSync(entry.path) ? entry : null;
+function buildPdfHtml(translations, targetLanguage) {
+  const isRtl = RTL_LANGS.has(targetLanguage.split('-')[0]);
+  const dir = isRtl ? 'rtl' : 'ltr';
+  // HTML-escape translated text to prevent stray < > & from breaking the DOM.
+  const esc = (s) => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const css = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: sans-serif; font-size: 12pt; line-height: 1.7;
+      color: #000; padding: 72px;
+      direction: ${dir}; unicode-bidi: plaintext;
     }
-  }
-  return null;
+    p { margin-bottom: 0.75em; word-break: break-word; white-space: pre-wrap; }
+  `;
+  const body = translations.map((t) => `<p>${esc(t)}</p>`).join('\n');
+  return `<!DOCTYPE html>\n<html lang="${esc(targetLanguage)}" dir="${dir}">\n<head><meta charset="utf-8"><style>${css}</style></head>\n<body>\n${body}\n</body>\n</html>`;
 }
 
 async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
@@ -329,14 +328,14 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
   const { PDFParse } = await import('pdf-parse');
   const data = await new PDFParse({ data: inputBuffer }).getText();
 
-  // Split on blank lines; collapse wrapped lines within each paragraph into a single string.
-  // Filters out very short fragments that are likely page numbers or running headers.
+  // Split on blank lines; collapse wrapped lines within each paragraph.
+  // Filter very short fragments (page numbers, headers).
   const paragraphs = data.text
     .split(/\n{2,}/)
     .map((p) => p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
     .filter((p) => p.length > 3);
 
-  if (paragraphs.length === 0) return { buffer: inputBuffer, characters: 0 };
+  if (paragraphs.length === 0) return { pdfHtml: null, characters: 0 };
 
   const characters = paragraphs.reduce((sum, p) => sum + p.length, 0);
   enforceBudget(characters, budget);
@@ -346,44 +345,11 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
 
-  const { default: PDFDocument } = await import('pdfkit');
-  const systemFont = getSystemFont(targetLanguage);
-
-  const pdfBuffer = await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 72, compress: false });
-    const chunks = [];
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    if (systemFont) {
-      // Try family name first (required for TTC collections); fall back to
-      // path-only (picks first font in collection) if the name lookup fails.
-      try {
-        doc.registerFont('TranslationFont',
-          systemFont.path,
-          systemFont.family ?? undefined,
-        );
-        doc.font('TranslationFont');
-      } catch {
-        try {
-          doc.registerFont('TranslationFont', systemFont.path);
-          doc.font('TranslationFont');
-        } catch {
-          // Leave pdfkit on its default Helvetica; glyphs will be wrong but
-          // the PDF won't crash.
-        }
-      }
-    }
-
-    for (let i = 0; i < translations.length; i++) {
-      if (i > 0) doc.moveDown(0.5);
-      doc.text(translations[i], { align: 'left', lineGap: 2 });
-    }
-    doc.end();
-  });
-
-  return { buffer: pdfBuffer, characters };
+  // Return HTML string — the Electron main process renders it to a real PDF via
+  // webContents.printToPDF(), which uses Chromium's font fallback and handles
+  // all Unicode scripts (CJK, Arabic, Hebrew, Thai, Devanagari, etc.) without
+  // any manual font registration.
+  return { pdfHtml: buildPdfHtml(translations, targetLanguage), characters };
 }
 
 async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget) {
@@ -600,6 +566,7 @@ export async function translateHandler(req, res) {
     let outputFileName = fileName;
     let mode = 'binary-pass-through';
     let charactersCharged = 0;
+    let pdfHtml = null;
 
     try {
       if (AZURE_TRANSLATOR_KEY) {
@@ -613,7 +580,14 @@ export async function translateHandler(req, res) {
           ({ buffer: outputBuffer, characters: charactersCharged } = await translateXlsx(inputBuffer, targetLanguage, fromLanguage, budget));
           mode = 'xlsx-translation';
         } else if (isPdf) {
-          ({ buffer: outputBuffer, characters: charactersCharged } = await translatePdf(inputBuffer, targetLanguage, fromLanguage, budget));
+          const pdfResult = await translatePdf(inputBuffer, targetLanguage, fromLanguage, budget);
+          charactersCharged = pdfResult.characters;
+          if (pdfResult.pdfHtml) {
+            pdfHtml = pdfResult.pdfHtml;
+            // Placeholder so storeTranslationAssets creates the directory and metadata.
+            // The Electron main process overwrites this with the real PDF via printToPDF().
+            outputBuffer = Buffer.from('%PDF-PLACEHOLDER');
+          }
           mode = 'pdf-translation';
         } else if (isSrt) {
           ({ buffer: outputBuffer, characters: charactersCharged } = await translateSrt(inputBuffer, targetLanguage, fromLanguage, budget));
@@ -676,6 +650,11 @@ export async function translateHandler(req, res) {
         characters: Number(usageRecord.characters || 0),
         charLimit: Number(usageRecord.charLimit || 0),
       },
+      // pdfHtml is base64-encoded HTML returned only for PDF translations.
+      // The Electron main process renders it to a real PDF via printToPDF().
+      ...(pdfHtml !== null && {
+        pdfHtml: Buffer.from(pdfHtml, 'utf8').toString('base64'),
+      }),
       content: outputBuffer.toString('base64'),
       encoding: 'base64',
     });

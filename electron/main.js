@@ -15,6 +15,7 @@ import { spawn } from 'child_process';
 import Store from 'electron-store';
 import keytar from 'keytar';
 import { config as loadDotenv } from 'dotenv';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -603,6 +604,64 @@ ipcMain.handle('admin:isUnlocked', async () => ({ ok: true, unlocked: adminUnloc
 // ─── Translation IPC ───────────────────────────────────────────────────────────
 
 /**
+ * Renders an HTML string to a PDF file using Electron's built-in Chromium renderer.
+ * Used after PDF translation — the backend returns HTML; we render it here so that
+ * Chromium's system-font fallback handles all Unicode scripts (CJK, Arabic, etc.)
+ * without any manual font registration.
+ *
+ * @param {string} pdfHtmlBase64 - Base64-encoded HTML string from the backend.
+ * @param {string} outputKey     - Relative path under app.getPath('userData') where the PDF lives.
+ */
+async function renderHtmlToPdf(pdfHtmlBase64, outputKey) {
+  const htmlString = Buffer.from(pdfHtmlBase64, 'base64').toString('utf8');
+  const outputPath = path.join(app.getPath('userData'), outputKey);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+  // data: URLs are limited to ~2 MB in Chromium. For larger HTML, write a temp file instead.
+  const LARGE = 1.5 * 1024 * 1024;
+  const useTempFile = Buffer.byteLength(htmlString, 'utf8') > LARGE;
+  let tempFilePath = null;
+  let win = null;
+
+  try {
+    win = new BrowserWindow({
+      width: 800,
+      height: 600,
+      show: false,
+      skipTaskbar: true,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        javascript: false,
+      },
+    });
+
+    if (useTempFile) {
+      tempFilePath = path.join(os.tmpdir(), `tg-pdf-${Date.now()}.html`);
+      await fs.writeFile(tempFilePath, htmlString, 'utf8');
+      await win.loadFile(tempFilePath);
+    } else {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlString)}`);
+    }
+
+    const pdfBuffer = await win.webContents.printToPDF({
+      paperWidth: 8.27,
+      paperHeight: 11.69,
+      marginType: 'custom',
+      margins: { top: 0.75, bottom: 0.75, left: 1.0, right: 1.0 },
+      printBackground: false,
+      landscape: false,
+      scale: 1,
+    });
+
+    await fs.writeFile(outputPath, pdfBuffer);
+  } finally {
+    if (win && !win.isDestroyed()) win.destroy();
+    if (tempFilePath) fs.unlink(tempFilePath).catch(() => {});
+  }
+}
+
+/**
  * Upload a file to the local helper translation API.
  * The renderer passes the file content as a base64 string.
  */
@@ -638,6 +697,12 @@ ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Conten
     };
     await saveLicenseSession(updatedSession);
     persistStoreLicense(updatedSession);
+  }
+
+  // PDF translations: the backend returns pdfHtml (base64 HTML) instead of a real PDF.
+  // Render it here using Electron's built-in Chromium so system fonts handle all scripts.
+  if (result?.pdfHtml && result?.outputKey) {
+    await renderHtmlToPdf(result.pdfHtml, result.outputKey);
   }
 
   return {
