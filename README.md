@@ -1,6 +1,21 @@
-# Translate Genie
+# Translate Genie — Affordable Document Translation Software
 
-The only software you need for going from one language to another seamlessly. Translate office documents with zero infrastructure setup. Upload from desktop, download a few moments later. It really is THAT easy! Completely private and secure, empowered entirely with Azure AI. Simply purchase a license, download the desktop app, and start translating your documents today. No more copy-pasting or manual translation work. Translate Genie is your one-stop solution for all your document translation needs. With multiple pricing tiers to choose from, you can select the plan that best fits your organization's needs.
+**Translate Genie is the easy, low-cost way to translate Word, PDF, PowerPoint, Excel, EPUB books and SRT/VTT subtitles into any language — with all your fonts, layout and formatting kept perfectly intact.** Just upload your file from your desktop, and download the finished translation moments later. No copy-pasting. No reformatting. No monthly subscription. It really is THAT easy.
+
+## Why people choose Translate Genie
+
+* **Better priced than the big names.** Pay once for the translations you need instead of paying every single month. No recurring fees, no surprise renewals.
+* **Easier to use.** Upload a document, get it back translated and ready to send. There is nothing to set up and nothing to learn.
+* **Formatting stays intact.** Your fonts, tables, images and layout come back exactly as you sent them — not a wall of plain text you have to rebuild.
+* **Translate more than documents.** Office files, PDFs, EPUB e-books and movie/TV subtitles are all supported.
+* **Private and secure.** Your documents stay yours.
+* **Pick the plan that fits.** Multiple pricing tiers mean you only pay for what you actually use.
+
+## A simpler, cheaper alternative to DeepL, Google Translate & Smartling
+
+Tired of monthly subscriptions and clunky enterprise tools? Translate Genie gives you professional, formatting-perfect document translation for a one-time price — a friendlier, more affordable alternative to DeepL, Google Translate and Smartling for anyone who needs to translate documents, books and subtitles without the ongoing cost or the steep learning curve.
+
+Simply purchase a license, download the desktop app, and start translating your documents today.
 
 * Main Website: https://translategenie.github.io/Software/
 * Translate Genie Reviews: https://translategenie.github.io/Software/
