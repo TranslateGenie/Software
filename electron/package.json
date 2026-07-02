@@ -66,7 +66,15 @@
         "to": "backend",
         "filter": [
           "**/*",
-          "!node_modules/.cache/**"
+          "!node_modules/**"
+        ]
+      },
+      {
+        "from": "../backend/node_modules",
+        "to": "backend/node_modules",
+        "filter": [
+          "**/*",
+          "!.cache/**"
         ]
       }
     ]
