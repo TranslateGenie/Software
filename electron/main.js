@@ -4,7 +4,7 @@
  * between the renderer (React UI) and Node.js APIs.
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net } from 'electron';
 import pkg from 'electron-updater';
 const { autoUpdater } = pkg;
 import path from 'path';
@@ -300,7 +300,22 @@ async function refreshLicenseSession({ allowStale = true } = {}) {
 }
 
 async function requestLocalHelper(pathname, options = {}) {
-  const response = await fetch(`${LICENSE_API_BASE_URL}${pathname}`, options);
+  // Electron's Chromium-backed net.fetch instead of Node's fetch: no 5-minute header timeout,
+  // so long-running jobs (AI polish/format on large documents) can't error out while the helper
+  // is still legitimately working.
+  const doFetch = () => net.fetch(`${LICENSE_API_BASE_URL}${pathname}`, options);
+  let response;
+  try {
+    response = await doFetch();
+  } catch (err) {
+    // Transient connection failures happen right after boot or while the helper is under heavy
+    // load. Reads are idempotent — retry them once. Writes (translate/polish charge money) are
+    // never retried automatically.
+    const method = String(options.method || 'GET').toUpperCase();
+    if (method !== 'GET') throw err;
+    await sleep(1500);
+    response = await doFetch();
+  }
 
   if (!response.ok) {
     const detail = await response.text();

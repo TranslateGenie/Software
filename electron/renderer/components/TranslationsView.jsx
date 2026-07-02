@@ -71,18 +71,30 @@ export default function TranslationsView({ onStatus }) {
   const [modal, setModal] = useState(null); // { type: 'info' | 'language' | 'format', file? }
   const [busyId, setBusyId] = useState(null);
 
-  const fetchTranslations = useCallback(async (lang) => {
+  // Background polls (interval, post-action refreshes) fail QUIETLY — a transient hiccup while
+  // the helper boots or is busy just means the next poll picks it up, and the current file list
+  // stays on screen. Only a user-initiated Refresh click surfaces a fetch error.
+  const fetchTranslations = useCallback(async (lang, { notify = false } = {}) => {
     const target = lang ?? activeLang;
     setLoading(true);
-    onStatus('Refreshing translations…', 'warn');
+    if (notify) onStatus('Refreshing translations…', 'warn');
     try {
-      const items = await window.mdas.listTranslations(target);
+      let items;
+      try {
+        items = await window.mdas.listTranslations(target);
+      } catch {
+        // One quiet retry — most failures are momentary (helper mid-boot or under load).
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        items = await window.mdas.listTranslations(target);
+      }
       setFiles(Array.isArray(items) ? items : []);
       setLastRefresh(new Date());
-      onStatus('Translations refreshed', 'ok');
+      if (notify) onStatus('Translations refreshed', 'ok');
     } catch (err) {
-      setAlert({ type: 'error', text: `Failed to fetch translations: ${err.message}` });
-      onStatus('Error fetching translations', 'error');
+      if (notify) {
+        setAlert({ type: 'error', text: `Failed to fetch translations: ${err.message}` });
+        onStatus('Error fetching translations', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -234,7 +246,7 @@ export default function TranslationsView({ onStatus }) {
             )}
             <button
               className="btn btn--secondary btn--sm"
-              onClick={() => fetchTranslations(activeLang)}
+              onClick={() => fetchTranslations(activeLang, { notify: true })}
               disabled={loading}
             >
               {loading ? <span className="spinner" /> : '↻ Refresh'}
