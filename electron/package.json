@@ -37,7 +37,6 @@
       "output": "dist"
     },
     "win": {
-      "publisherName": "Kayleb Pettinger",
       "azureSignOptions": {
         "publisherName": "Kayleb Pettinger",
         "endpoint": "https://eus.codesigning.azure.net/",
