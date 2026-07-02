@@ -112,6 +112,9 @@ function enforceBudget(rawChars, budget) {
 const DOCX_CFG = { ns: 'http://schemas.openxmlformats.org/wordprocessingml/2006/main', prefix: 'w', paraTag: 'p',  runTag: 'r', rPrTag: 'rPr', textTag: 't' };
 const PPTX_CFG = { ns: 'http://schemas.openxmlformats.org/drawingml/2006/main',        prefix: 'a', paraTag: 'p',  runTag: 'r', rPrTag: 'rPr', textTag: 't' };
 const XLSX_CFG = { ns: 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',     prefix: '',  paraTag: 'si', runTag: 'r', rPrTag: 'rPr', textTag: 't' };
+// Inline strings in worksheets (cells with t="inlineStr") use the same run structure as
+// sharedStrings but wrap it in an <is> container instead of <si>.
+const XLSX_INLINE_CFG = { ...XLSX_CFG, paraTag: 'is' };
 
 // Translates run-formatted OOXML parts while preserving per-run character formatting.
 // For each paragraph we wrap every run's text in a <span id="i"> tag and translate it as
@@ -225,44 +228,80 @@ async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguag
   return { parts: docs.map((doc) => serializer.serializeToString(doc)), characters };
 }
 
+// Translates a set of OOXML parts (matched by regex against the zip's file names) in a single
+// batched pass and writes each result back to the same part. Returns the summed visible-text
+// `characters`. Parts that don't exist are silently skipped, so callers can list optional parts
+// (headers, footnotes, speaker notes, …) without first checking for them.
+async function translateZipParts(zip, namePattern, config, targetLanguage, fromLanguage, budget) {
+  const names = Object.keys(zip.files).filter((name) => namePattern.test(name)).sort();
+  if (names.length === 0) return 0;
+
+  const { parts, characters } = await translateOoxmlParts(
+    names.map((name) => zip.file(name).asText()),
+    config,
+    targetLanguage,
+    fromLanguage,
+    budget,
+  );
+  names.forEach((name, i) => zip.file(name, parts[i]));
+  return characters;
+}
+
 async function translateDocx(inputBuffer, targetLanguage, fromLanguage, budget) {
   const zip = new PizZip(inputBuffer);
-  const docFile = zip.file('word/document.xml');
-  if (!docFile) throw new Error('Invalid DOCX: word/document.xml not found.');
+  if (!zip.file('word/document.xml')) throw new Error('Invalid DOCX: word/document.xml not found.');
 
-  const { parts: [out], characters } = await translateOoxmlParts([docFile.asText()], DOCX_CFG, targetLanguage, fromLanguage, budget);
-  zip.file('word/document.xml', out);
+  // Translate the main body plus every part that carries visible text: headers, footers,
+  // foot/endnotes, and comments. Text boxes live inside document.xml as w:p, so they are
+  // already covered. All parts use the same wordprocessingml namespace (DOCX_CFG).
+  const characters = await translateZipParts(
+    zip,
+    /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/,
+    DOCX_CFG,
+    targetLanguage,
+    fromLanguage,
+    budget,
+  );
   return { buffer: Buffer.from(zip.generate({ type: 'nodebuffer' })), characters };
 }
 
 async function translatePptx(inputBuffer, targetLanguage, fromLanguage, budget) {
   const zip = new PizZip(inputBuffer);
 
-  const slideFiles = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    .sort();
-
-  if (slideFiles.length === 0) return { buffer: inputBuffer, characters: 0 };
-
-  const { parts, characters } = await translateOoxmlParts(
-    slideFiles.map((name) => zip.file(name).asText()),
+  // Slides, speaker notes, and SmartArt diagram data all use the drawingml (a:) namespace, so
+  // they batch through one PPTX_CFG pass. Embedded chart text uses the c: namespace and is
+  // deferred to a later pass.
+  const characters = await translateZipParts(
+    zip,
+    /^ppt\/(slides\/slide\d+|notesSlides\/notesSlide\d+|diagrams\/data\d+)\.xml$/,
     PPTX_CFG,
     targetLanguage,
     fromLanguage,
     budget,
   );
-  slideFiles.forEach((name, i) => zip.file(name, parts[i]));
+  if (characters === 0) return { buffer: inputBuffer, characters: 0 };
 
   return { buffer: Buffer.from(zip.generate({ type: 'nodebuffer' })), characters };
 }
 
 async function translateXlsx(inputBuffer, targetLanguage, fromLanguage, budget) {
   const zip = new PizZip(inputBuffer);
-  const ssFile = zip.file('xl/sharedStrings.xml');
-  if (!ssFile) return { buffer: inputBuffer, characters: 0 };
 
-  const { parts: [out], characters } = await translateOoxmlParts([ssFile.asText()], XLSX_CFG, targetLanguage, fromLanguage, budget);
-  zip.file('xl/sharedStrings.xml', out);
+  // Most cell text lives in the shared-string table (<si> containers). Pass 1 handles it.
+  const ssChars = await translateZipParts(
+    zip, /^xl\/sharedStrings\.xml$/, XLSX_CFG, targetLanguage, fromLanguage, budget,
+  );
+
+  // Pass 2: inline strings written directly into worksheets (<is> containers). Decrement the
+  // remaining budget by what pass 1 already counted so enforcement is on the combined total.
+  // Chart/drawing text uses other namespaces and is deferred to a later pass.
+  const inlineBudget = budget == null ? null : budget - ssChars;
+  const inlineChars = await translateZipParts(
+    zip, /^xl\/worksheets\/sheet\d+\.xml$/, XLSX_INLINE_CFG, targetLanguage, fromLanguage, inlineBudget,
+  );
+
+  const characters = ssChars + inlineChars;
+  if (characters === 0) return { buffer: inputBuffer, characters: 0 };
   return { buffer: Buffer.from(zip.generate({ type: 'nodebuffer' })), characters };
 }
 
@@ -341,9 +380,81 @@ function buildPdfHtml(blocks, targetLanguage) {
   return `<!DOCTYPE html>\n<html lang="${esc(targetLanguage)}" dir="${dir}">\n<head><meta charset="utf-8"><style>${css}</style></head>\n<body>\n${body}</body>\n</html>`;
 }
 
+// Target languages whose script pdf-lib cannot draw correctly without a shaping engine, so the
+// whole document routes to the Chromium reflow path (which shapes text and supplies fonts):
+//   - RTL scripts need contextual joining + bidi reordering
+//   - Indic/Brahmic + SE-Asian scripts need glyph reordering and ligatures
+//   - CJK is shaping-free but needs large fonts — deferred until Noto CJK is bundled (v1)
+// Everything else (Latin/Cyrillic/Greek) draws glyph-by-glyph LTR and is overlay-safe.
+const OVERLAY_UNSAFE_LANGS = new Set([
+  'ar', 'fa', 'ur', 'he', 'yi', 'dv', 'ps', 'sd', 'ckb', 'ug',          // RTL
+  'zh', 'zh-hans', 'zh-hant', 'ja', 'ko', 'yue',                        // CJK (deferred)
+  'hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'si', 'ne',    // Indic
+  'mr', 'as', 'sa', 'th', 'lo', 'km', 'my', 'bo', 'dz', 'am', 'ti',    // Indic / SE-Asian
+]);
+
+function isOverlaySafeLang(targetLanguage) {
+  const base = String(targetLanguage).toLowerCase();
+  return !OVERLAY_UNSAFE_LANGS.has(base) && !OVERLAY_UNSAFE_LANGS.has(base.split('-')[0]);
+}
+
+// Multi-column detection. Multi-column pages reconstruct poorly in place, so they route to
+// reflow. Two signals, because columns surface differently depending on how lines were grouped:
+//   A) Left-edge clustering — columns whose lines stayed separate produce 2+ separated clusters
+//      of line start-x.
+//   B) Vertical gutter — side-by-side column lines that share a baseline merge into one line; we
+//      catch those by a wide internal horizontal gap straddling the page midline on many lines.
+// pageWidth is the page width in PDF units.
+function detectMultiColumn(lines, pageWidth) {
+  if (lines.length < 6) return false;
+
+  const lefts = lines.map((l) => l.left).sort((a, b) => a - b);
+  const gutter = pageWidth * 0.12;
+  const clusters = [[lefts[0]]];
+  for (let i = 1; i < lefts.length; i++) {
+    if (lefts[i] - lefts[i - 1] > gutter) clusters.push([]);
+    clusters[clusters.length - 1].push(lefts[i]);
+  }
+  if (clusters.filter((c) => c.length >= lines.length * 0.2).length >= 2) return true;
+
+  const mid = pageWidth * 0.5;
+  let gutterLines = 0;
+  for (const line of lines) {
+    const items = line.items || [];
+    for (let i = 1; i < items.length; i++) {
+      const prevRight = items[i - 1].x + items[i - 1].w;
+      if (items[i].x - prevRight > pageWidth * 0.1 && prevRight < mid && items[i].x > mid) {
+        gutterLines++;
+        break;
+      }
+    }
+  }
+  return gutterLines >= lines.length * 0.3;
+}
+
+// Table detection: a tabular line has multiple wide internal horizontal gaps between its runs.
+// If a large share of lines look tabular, in-place overlay would misalign columns, so reflow.
+function detectTableLike(lines) {
+  if (lines.length < 4) return false;
+  let tabular = 0;
+  for (const line of lines) {
+    const items = line.items;
+    if (items.length < 3) continue;
+    const charW = line.h * 0.5 || 6;
+    let gaps = 0;
+    for (let i = 1; i < items.length; i++) {
+      const prevRight = items[i - 1].x + items[i - 1].w;
+      if (items[i].x - prevRight > charW * 3) gaps++;
+    }
+    if (gaps >= 2) tabular++;
+  }
+  return tabular >= lines.length * 0.3;
+}
+
 async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
-  // Use pdfjs-dist directly (transitive dep of pdf-parse) to access per-item font
-  // size (transform[3]) and y-position — data that pdf-parse's getText() discards.
+  // Use pdfjs-dist directly (transitive dep of pdf-parse) to access per-item font size
+  // (transform[3]), position (transform[4]/[5]), and advance width (item.width) — data that
+  // pdf-parse's getText() discards but the layout-faithful overlay needs.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
   const pdfDoc = await pdfjs.getDocument({
@@ -353,97 +464,149 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     useSystemFonts: true,
   }).promise;
 
-  const allLines = [];
+  const overlaySafe = isOverlaySafeLang(targetLanguage);
+  const BULLET = /^[•·∙●○▪▸►→\-\*]\s/;
+
+  // Per-page line extraction. Coordinates are kept in NATIVE PDF user space (origin bottom-left,
+  // y up) — the same space pdf-lib uses — so overlay coordinates line up with the original page
+  // directly. A flipped `yTop` (top-down) is computed only for reading-order sorting/grouping.
+  const pageData = [];
 
   for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
     const page = await pdfDoc.getPage(pageNum);
     const viewport = page.getViewport({ scale: 1 });
+    const pageHeight = viewport.height;
     const tc = await page.getTextContent();
 
-    // Flip PDF y (bottom-up) to screen y (top-down) for reading-order sorting.
     const items = tc.items
       .filter((item) => 'str' in item && item.str.trim())
-      .map((item) => ({
-        str: item.str,
-        x: item.transform[4],
-        y: viewport.height - item.transform[5],
-        h: Math.abs(item.transform[3]) || Math.abs(item.height) || 0,
-      }))
-      .sort((a, b) => a.y - b.y || a.x - b.x);
+      .map((item) => {
+        const h = Math.abs(item.transform[3]) || Math.abs(item.height) || 0;
+        const x = item.transform[4];
+        const baseY = item.transform[5];          // native baseline (bottom-up)
+        return { str: item.str, x, baseY, w: item.width || 0, h, yTop: pageHeight - baseY };
+      })
+      .sort((a, b) => a.yTop - b.yTop || a.x - b.x);
 
-    // Group items within ±3 units vertically into the same line.
+    // Group items within ±3 units vertically into one line.
+    const lines = [];
     for (const item of items) {
-      const last = allLines[allLines.length - 1];
-      if (last && last.page === pageNum && Math.abs(item.y - last.y) < 3) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(item.yTop - last.yTop) < 3) {
         last.items.push(item);
         last.h = Math.max(last.h, item.h);
       } else {
-        allLines.push({ y: item.y, h: item.h, page: pageNum, items: [item] });
+        lines.push({ yTop: item.yTop, h: item.h, items: [item] });
       }
     }
 
+    for (const line of lines) {
+      line.items.sort((a, b) => a.x - b.x);
+      line.text = line.items.map((i) => i.str).join('').trim();
+      // Native (bottom-up) bounding box of the line.
+      line.left = Math.min(...line.items.map((i) => i.x));
+      line.right = Math.max(...line.items.map((i) => i.x + i.w));
+      line.top = Math.max(...line.items.map((i) => i.baseY + i.h));        // highest point
+      line.bottom = Math.min(...line.items.map((i) => i.baseY - i.h * 0.25)); // lowest point
+    }
+
+    pageData.push({ pageNum, width: viewport.width, height: pageHeight, lines: lines.filter((l) => l.text) });
     page.cleanup();
   }
-
   await pdfDoc.destroy();
-  if (allLines.length === 0) return { pdfHtml: null, characters: 0 };
 
-  // Sort items within each line left-to-right and join into a single string.
-  for (const line of allLines) {
-    line.items.sort((a, b) => a.x - b.x);
-    line.text = line.items.map((i) => i.str).join('').trim();
-  }
+  const allLines = pageData.flatMap((p) => p.lines);
+  if (allLines.length === 0) return { pdf: null, characters: 0 };
 
-  // Body font size = modal rounded height across all lines.
+  // Body font size = modal rounded line height across the whole document.
   const counts = {};
   for (const l of allLines) {
     if (l.h > 0) { const k = Math.round(l.h); counts[k] = (counts[k] || 0) + 1; }
   }
   const bodyH = Number(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 12);
 
-  const BULLET = /^[•·∙●○▪▸►→\-\*]\s/;
+  // Classify each page's lines into blocks, carrying geometry so the overlay can place each
+  // translated block back into its source region. Headings/bullets are one line per block; body
+  // lines merge into paragraphs (better translation quality) and their boxes union together.
+  for (const page of pageData) {
+    const blocks = [];
+    for (let i = 0; i < page.lines.length; i++) {
+      const line = page.lines[i];
+      const prev = page.lines[i - 1];
+      const gap = prev ? (line.yTop - prev.yTop) : Infinity;
+      const isParaBreak = gap > bodyH * 1.5;
 
-  const blocks = [];
-  for (let i = 0; i < allLines.length; i++) {
-    const line = allLines[i];
-    if (!line.text) continue;
+      const ratio = bodyH > 0 ? line.h / bodyH : 1;
+      const type = BULLET.test(line.text) ? 'li'
+        : ratio > 1.5  ? 'h1'
+        : ratio > 1.25 ? 'h2'
+        : ratio > 1.1  ? 'h3'
+        : 'p';
 
-    const prev = allLines[i - 1];
-    const diffPage = prev && line.page !== prev.page;
-    const gap = (!diffPage && prev) ? (line.y - prev.y) : Infinity;
-    const isParaBreak = diffPage || gap > bodyH * 1.5;
-
-    const ratio = bodyH > 0 ? line.h / bodyH : 1;
-    const type = BULLET.test(line.text) ? 'li'
-      : ratio > 1.5  ? 'h1'
-      : ratio > 1.25 ? 'h2'
-      : ratio > 1.1  ? 'h3'
-      : 'p';
-
-    // Merge consecutive body-text lines into one paragraph unless there's a gap.
-    const last = blocks[blocks.length - 1];
-    if (last && last.type === 'p' && type === 'p' && !isParaBreak) {
-      last.text += ' ' + line.text;
-    } else {
-      blocks.push({ type, text: line.text });
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'p' && type === 'p' && !isParaBreak) {
+        last.text += ' ' + line.text;
+        last.left = Math.min(last.left, line.left);
+        last.right = Math.max(last.right, line.right);
+        last.top = Math.max(last.top, line.top);
+        last.bottom = Math.min(last.bottom, line.bottom);
+      } else {
+        blocks.push({ type, text: line.text, fontSize: line.h || bodyH,
+          left: line.left, right: line.right, top: line.top, bottom: line.bottom });
+      }
     }
+    page.blocks = blocks.filter((b) => b.text.length > 1);
   }
 
-  const valid = blocks.filter((b) => b.text.length > 1);
-  if (valid.length === 0) return { pdfHtml: null, characters: 0 };
+  // Per-page routing. A page reflows if the target script isn't overlay-safe, or the page is
+  // multi-column / table-like (in-place text would misalign). Otherwise it gets a vector overlay.
+  for (const page of pageData) {
+    page.mode = (!overlaySafe
+      || detectMultiColumn(page.lines, page.width)
+      || detectTableLike(page.lines))
+      ? 'reflow' : 'overlay';
+  }
 
-  const characters = valid.reduce((sum, b) => sum + b.text.length, 0);
+  // Charge for all visible block text, enforced once before any Azure call.
+  const allBlocks = pageData.flatMap((p) => p.blocks);
+  if (allBlocks.length === 0) return { pdf: null, characters: 0 };
+  const characters = allBlocks.reduce((sum, b) => sum + b.text.length, 0);
   enforceBudget(characters, budget);
 
+  // Translate every block in batches across the whole document.
   const translations = [];
-  for (const chunk of chunkTexts(valid.map((b) => b.text))) {
+  for (const chunk of chunkTexts(allBlocks.map((b) => b.text))) {
     translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
   }
-  for (let i = 0; i < valid.length; i++) {
-    valid[i].translated = translations[i] ?? valid[i].text;
+  allBlocks.forEach((b, i) => { b.translated = translations[i] ?? b.text; });
+
+  // Fast path: when every page reflows (e.g. a complex-script target), return one combined HTML
+  // document and let Electron render it in a single Chromium pass — no pdf-lib, no original-PDF
+  // round-trip. This is the same cheap path the pipeline used before overlay support.
+  if (pageData.every((p) => p.mode === 'reflow')) {
+    return { pdf: { allReflowHtml: buildPdfHtml(allBlocks, targetLanguage) }, characters };
   }
 
-  return { pdfHtml: buildPdfHtml(valid, targetLanguage), characters };
+  // Mixed/overlay document: structured per-page payload. Overlay pages carry cover boxes +
+  // positioned translated runs (native PDF coords); reflow pages carry their own HTML. Electron
+  // copies overlay pages from the original (keeping vector graphics) and merges the rest.
+  const pages = pageData.map((page) => {
+    if (page.mode === 'overlay') {
+      return {
+        mode: 'overlay',
+        runs: page.blocks.map((b) => ({
+          x: b.left, y: b.bottom, w: Math.max(0, b.right - b.left), h: Math.max(0, b.top - b.bottom),
+          fontSize: b.fontSize, translated: b.translated,
+        })),
+      };
+    }
+    return { mode: 'reflow', html: buildPdfHtml(page.blocks, targetLanguage) };
+  });
+
+  return {
+    pdf: { originalPdfBase64: inputBuffer.toString('base64'), pages },
+    characters,
+  };
 }
 
 async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget) {
@@ -660,7 +823,7 @@ export async function translateHandler(req, res) {
     let outputFileName = fileName;
     let mode = 'binary-pass-through';
     let charactersCharged = 0;
-    let pdfHtml = null;
+    let pdfPayload = null;
 
     try {
       if (AZURE_TRANSLATOR_KEY) {
@@ -676,10 +839,10 @@ export async function translateHandler(req, res) {
         } else if (isPdf) {
           const pdfResult = await translatePdf(inputBuffer, targetLanguage, fromLanguage, budget);
           charactersCharged = pdfResult.characters;
-          if (pdfResult.pdfHtml) {
-            pdfHtml = pdfResult.pdfHtml;
+          if (pdfResult.pdf) {
+            pdfPayload = pdfResult.pdf;
             // Placeholder so storeTranslationAssets creates the directory and metadata.
-            // The Electron main process overwrites this with the real PDF via printToPDF().
+            // The Electron main process overwrites this with the real PDF it renders.
             outputBuffer = Buffer.from('%PDF-PLACEHOLDER');
           }
           mode = 'pdf-translation';
@@ -744,11 +907,10 @@ export async function translateHandler(req, res) {
         characters: Number(usageRecord.characters || 0),
         charLimit: Number(usageRecord.charLimit || 0),
       },
-      // pdfHtml is base64-encoded HTML returned only for PDF translations.
-      // The Electron main process renders it to a real PDF via printToPDF().
-      ...(pdfHtml !== null && {
-        pdfHtml: Buffer.from(pdfHtml, 'utf8').toString('base64'),
-      }),
+      // pdf is the structured layout payload returned only for PDF translations:
+      // { originalPdfBase64, pages:[ overlay | reflow ] }. The Electron main process renders it
+      // to a real PDF — vector overlay for overlay pages, Chromium printToPDF for reflow pages.
+      ...(pdfPayload !== null && { pdf: pdfPayload }),
       content: outputBuffer.toString('base64'),
       encoding: 'base64',
     });

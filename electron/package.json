@@ -10,17 +10,19 @@
     "build": "vite build && electron-builder --publish never"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "dotenv": "^16.4.5",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.9",
-    "keytar": "^7.9.0"
+    "keytar": "^7.9.0",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^41.2.0",
-    "electron-builder": "^24.13.3",
+    "electron-builder": "^26.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "vite": "^5.1.4",
@@ -34,10 +36,20 @@
     "directories": {
       "output": "dist"
     },
+    "win": {
+      "publisherName": "Kayleb Pettinger",
+      "azureSignOptions": {
+        "publisherName": "Kayleb Pettinger",
+        "endpoint": "https://eus.codesigning.azure.net/",
+        "codeSigningAccountName": "translate-genie",
+        "certificateProfileName": "translate-genie"
+      }
+    },
     "files": [
       "main.js",
       "preload.js",
       "renderer/dist/**",
+      "assets/fonts/**",
       "node_modules/**"
     ],
     "publish": {

@@ -93,29 +93,37 @@ jobs:
           # Optionally set INSTALLER_URL for download handler
           # This will be replaced with the actual release URL after publishing
           INSTALLER_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mdas-installer.exe
+          # Azure Trusted Signing credentials. electron-builder's azureSignOptions signs the
+          # installer during this step (before latest.yml's hash is computed, so the signed
+          # binary and the auto-update feed stay consistent). Auth is a service principal read
+          # by @azure/identity's DefaultAzureCredential from these env vars.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       - name: List build artifacts
         run: |
           ls -R electron/dist
         shell: pwsh
 
-      - name: Sign installer
-        if: github.ref_type == 'tag'
-        # TODO: Uncomment and configure if you have a code signing certificate
-        # Steps to set up:
-        # 1. Store your .pfx certificate in GitHub Secrets as WINDOWS_CERT_B64
-        # 2. Set the certificate password in GitHub Secrets as WINDOWS_CERT_PASSWORD
-        # 3. Uncomment the following block
-        #
-        # run: |
-        #   $cert_b64 = "${{ secrets.WINDOWS_CERT_B64 }}"
-        #   $cert_path = "C:\temp\cert.pfx"
-        #   [IO.File]::WriteAllBytes($cert_path, [Convert]::FromBase64String($cert_b64))
-        #   $timestamp_server = "http://timestamp.globalsign.com/scripts/timstamp.dll"
-        #   signtool sign /f $cert_path /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /t "$timestamp_server" "electron\dist\MDAS-*.exe"
-        #   Remove-Item $cert_path
-        # shell: pwsh
-        run: echo "Code signing not configured yet. To enable, set WINDOWS_CERT_B64 and WINDOWS_CERT_PASSWORD secrets."
+      - name: Verify Authenticode signature
+        # electron-builder already signed the installer during the build step (azureSignOptions).
+        # This confirms the signature is valid and fails the release if signing silently didn't
+        # happen — e.g. a missing/expired AZURE_CLIENT_SECRET or a revoked signer role.
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path "electron/dist" -Filter "*.exe" -Recurse -File |
+            Where-Object { $_.FullName -notmatch 'win-unpacked' } |
+            Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $installer) { Write-Error "No installer .exe found to verify"; exit 1 }
+          $sig = Get-AuthenticodeSignature $installer.FullName
+          Write-Output "Installer: $($installer.Name)"
+          Write-Output "Signature status: $($sig.Status)"
+          Write-Output "Signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') {
+            Write-Error "Installer is not validly signed (status: $($sig.Status))"
+            exit 1
+          }
 
       - name: Resolve release metadata
         id: meta

@@ -10,12 +10,14 @@ const { autoUpdater } = pkg;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
 import Store from 'electron-store';
 import keytar from 'keytar';
 import { config as loadDotenv } from 'dotenv';
 import os from 'os';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -323,8 +325,70 @@ function assertAdmin() {
 }
 
 let mainWindow;
+let splashWindow = null;
 
 // ─── Window Creation ───────────────────────────────────────────────────────────
+
+// A lightweight always-on-top splash shown the instant the app is ready, so the user sees
+// feedback during the (potentially several-second) wait for the local Express helper to boot.
+// It loads a self-contained data: URL — no extra asset files — and is destroyed the moment the
+// main window is ready to show. Startup is never blocked if the splash fails to create.
+function createSplashWindow() {
+  try {
+    splashWindow = new BrowserWindow({
+      width: 380,
+      height: 240,
+      frame: false,
+      resizable: false,
+      movable: false,
+      center: true,
+      show: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      backgroundColor: '#0f172a',
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+
+    let logoImg = '';
+    try {
+      const logoPath = path.join(__dirname, 'Logo.png');
+      if (existsSync(logoPath)) {
+        logoImg = `<img src="data:image/png;base64,${readFileSync(logoPath).toString('base64')}" alt="" />`;
+      }
+    } catch { /* logo is optional */ }
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;
+        background:#0f172a;color:#e2e8f0;overflow:hidden;}
+      .wrap{height:100%;display:flex;flex-direction:column;align-items:center;
+        justify-content:center;gap:14px;-webkit-user-select:none;cursor:default;}
+      img{width:64px;height:64px;border-radius:12px;}
+      .title{font-size:16px;font-weight:600;letter-spacing:.3px;}
+      .spinner{width:24px;height:24px;border:3px solid rgba(148,163,184,.25);
+        border-top-color:#38bdf8;border-radius:50%;animation:spin .8s linear infinite;}
+      .sub{font-size:12px;color:#94a3b8;}
+      @keyframes spin{to{transform:rotate(360deg);}}
+    </style></head><body><div class="wrap">
+      ${logoImg}
+      <div class="title">Translate Genie</div>
+      <div class="spinner"></div>
+      <div class="sub">Starting up…</div>
+    </div></body></html>`;
+
+    splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    splashWindow.once('ready-to-show', () => {
+      if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+    });
+  } catch (err) {
+    console.warn('Splash window failed to create:', err?.message || err);
+    splashWindow = null;
+  }
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
+  splashWindow = null;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -376,12 +440,17 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    // Hand off from the splash only once the real UI is on screen (avoids a blank flash).
+    closeSplashWindow();
   });
 }
 
 // ─── App Lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // Show the splash right away so the user has feedback while the local helper boots.
+  createSplashWindow();
+
   const launchHelper = async (triesLeft) => {
     try {
       await startLocalHelperServer();
@@ -417,6 +486,7 @@ app.whenReady().then(() => {
       createWindow();
     })
     .catch((error) => {
+      closeSplashWindow();
       dialog.showErrorBox('Local Helper Failed', error.message || 'Could not start local helper service.');
       app.quit();
     });
@@ -623,19 +693,14 @@ ipcMain.handle('admin:isUnlocked', async () => ({ ok: true, unlocked: adminUnloc
 // ─── Translation IPC ───────────────────────────────────────────────────────────
 
 /**
- * Renders an HTML string to a PDF file using Electron's built-in Chromium renderer.
- * Used after PDF translation — the backend returns HTML; we render it here so that
- * Chromium's system-font fallback handles all Unicode scripts (CJK, Arabic, etc.)
- * without any manual font registration.
+ * Renders an HTML string to a PDF buffer using Electron's built-in Chromium renderer, so that
+ * Chromium's system-font fallback handles all Unicode scripts (CJK, Arabic, etc.) and shaping
+ * without any manual font registration. Used for the reflow path of PDF translation.
  *
- * @param {string} pdfHtmlBase64 - Base64-encoded HTML string from the backend.
- * @param {string} outputKey     - Relative path under app.getPath('userData') where the PDF lives.
+ * @param {string} htmlString - The HTML document to render.
+ * @returns {Promise<Buffer>} The rendered PDF bytes.
  */
-async function renderHtmlToPdf(pdfHtmlBase64, outputKey) {
-  const htmlString = Buffer.from(pdfHtmlBase64, 'base64').toString('utf8');
-  const outputPath = path.join(app.getPath('userData'), outputKey);
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-
+async function htmlToPdfBuffer(htmlString) {
   // data: URLs are limited to ~2 MB in Chromium. For larger HTML, write a temp file instead.
   const LARGE = 1.5 * 1024 * 1024;
   const useTempFile = Buffer.byteLength(htmlString, 'utf8') > LARGE;
@@ -663,7 +728,7 @@ async function renderHtmlToPdf(pdfHtmlBase64, outputKey) {
       await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlString)}`);
     }
 
-    const pdfBuffer = await win.webContents.printToPDF({
+    return await win.webContents.printToPDF({
       paperWidth: 8.27,
       paperHeight: 11.69,
       marginType: 'custom',
@@ -672,12 +737,115 @@ async function renderHtmlToPdf(pdfHtmlBase64, outputKey) {
       landscape: false,
       scale: 1,
     });
-
-    await fs.writeFile(outputPath, pdfBuffer);
   } finally {
     if (win && !win.isDestroyed()) win.destroy();
     if (tempFilePath) fs.unlink(tempFilePath).catch(() => {});
   }
+}
+
+// Path to the bundled Noto Sans (covers Latin/Cyrillic/Greek) used for the vector overlay.
+// In dev it sits next to main.js; in packaged builds it ships via the assets/fonts files glob.
+function overlayFontPath() {
+  return path.join(__dirname, 'assets', 'fonts', 'NotoSans-Regular.ttf');
+}
+
+// Word-wraps text to a maximum width at a given font size.
+function wrapTextToWidth(text, font, size, maxWidth) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const word of words) {
+    const candidate = cur ? `${cur} ${word}` : word;
+    if (!cur || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      cur = candidate;
+    } else {
+      lines.push(cur);
+      cur = word;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// Auto-shrinks a translated run to fit its source box. Translation expansion is the main overlay
+// fidelity risk, so we step the font size down until the wrapped lines fit the box height,
+// bottoming out at 4pt (worst case accepts slight overflow rather than dropping text).
+function fitTextToBox(text, font, run) {
+  const maxW = Math.max(1, run.w);
+  const maxH = Math.max(1, run.h);
+  let size = Math.max(4, Math.min(run.fontSize || 12, 96));
+  for (; size >= 4; size -= 0.5) {
+    const lines = wrapTextToWidth(text, font, size, maxW);
+    const lineH = font.heightAtSize(size) * 1.05;
+    if (lines.length * lineH <= maxH + 0.5) return { size, lines, lineH };
+  }
+  const lines = wrapTextToWidth(text, font, 4, maxW);
+  return { size: 4, lines, lineH: font.heightAtSize(4) * 1.05 };
+}
+
+// Draws cover boxes over the source text and the fitted translated runs onto a copied page.
+function drawOverlayRuns(page, runs, font) {
+  const white = rgb(1, 1, 1);
+  const black = rgb(0, 0, 0);
+  for (const run of runs) {
+    if (!run.translated || !run.translated.trim()) continue;
+    try {
+      // Cover the source text (v1 assumes a light background; non-white pages route to reflow).
+      page.drawRectangle({ x: run.x, y: run.y, width: run.w, height: run.h, color: white });
+
+      const { size, lines, lineH } = fitTextToBox(run.translated, font, run);
+      let cursorY = run.y + run.h - size; // first baseline near the box top
+      for (const line of lines) {
+        page.drawText(line, { x: run.x, y: cursorY, size, font, color: black });
+        cursorY -= lineH;
+      }
+    } catch {
+      // A single un-renderable run (e.g. an unsupported glyph) must not abort the whole document.
+    }
+  }
+}
+
+/**
+ * Renders the backend's structured PDF payload to a real PDF file.
+ *  - all-reflow docs: one Chromium render of the combined HTML (cheap, full script support).
+ *  - mixed/overlay docs: copy each overlay page from the original PDF (keeping vector graphics
+ *    and images) and draw cover boxes + translated text on top; render reflow pages via Chromium
+ *    and merge everything in original order with pdf-lib.
+ *
+ * @param {object} payload   - { allReflowHtml } | { originalPdfBase64, pages:[overlay|reflow] }
+ * @param {string} outputKey - Relative path under app.getPath('userData') for the output PDF.
+ */
+async function renderTranslatedPdf(payload, outputKey) {
+  const outputPath = path.join(app.getPath('userData'), outputKey);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+  // All-reflow fast path.
+  if (payload.allReflowHtml) {
+    const buf = await htmlToPdfBuffer(payload.allReflowHtml);
+    await fs.writeFile(outputPath, buf);
+    return;
+  }
+
+  const srcDoc = await PDFDocument.load(Buffer.from(payload.originalPdfBase64, 'base64'));
+  const outDoc = await PDFDocument.create();
+  outDoc.registerFontkit(fontkit);
+  const font = await outDoc.embedFont(await fs.readFile(overlayFontPath()), { subset: true });
+
+  for (let i = 0; i < payload.pages.length; i++) {
+    const spec = payload.pages[i];
+    if (spec.mode === 'overlay') {
+      const [copied] = await outDoc.copyPages(srcDoc, [i]);
+      outDoc.addPage(copied);
+      drawOverlayRuns(copied, spec.runs, font);
+    } else {
+      // Reflow page: render its HTML (may span multiple output pages) and import them.
+      const reflowDoc = await PDFDocument.load(await htmlToPdfBuffer(spec.html));
+      const copiedPages = await outDoc.copyPages(reflowDoc, reflowDoc.getPageIndices());
+      for (const p of copiedPages) outDoc.addPage(p);
+    }
+  }
+
+  await fs.writeFile(outputPath, await outDoc.save());
 }
 
 /**
@@ -718,10 +886,10 @@ ipcMain.handle('translation:uploadFile', async (_event, { fileName, base64Conten
     persistStoreLicense(updatedSession);
   }
 
-  // PDF translations: the backend returns pdfHtml (base64 HTML) instead of a real PDF.
-  // Render it here using Electron's built-in Chromium so system fonts handle all scripts.
-  if (result?.pdfHtml && result?.outputKey) {
-    await renderHtmlToPdf(result.pdfHtml, result.outputKey);
+  // PDF translations: the backend returns a structured `pdf` payload instead of a real PDF.
+  // Render it here — vector overlay (pdf-lib) for layout-faithful pages, Chromium for reflow.
+  if (result?.pdf && result?.outputKey) {
+    await renderTranslatedPdf(result.pdf, result.outputKey);
   }
 
   return {
