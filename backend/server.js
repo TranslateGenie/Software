@@ -8,6 +8,8 @@ import { squareWebhookHandler } from './api/square-webhook.js';
 import { createCheckoutHandler } from './api/create-checkout.js';
 import {
   translateHandler,
+  reformatHandler,
+  polishHandler,
   listTranslationsHandler,
   getTranslationHandler,
   getTranslationFileHandler,
@@ -85,6 +87,8 @@ app.get('/api/download-installer', downloadInstallerHandler);
 app.post('/api/square-webhook', squareWebhookHandler);
 app.post('/create-checkout', createCheckoutHandler);
 app.post('/api/translate', translateHandler);
+app.post('/api/reformat', reformatHandler);
+app.post('/api/polish', polishHandler);
 app.get('/api/translations', listTranslationsHandler);
 app.delete('/api/translations', clearTranslationsHandler);
 app.get('/api/translation/:id', getTranslationHandler);

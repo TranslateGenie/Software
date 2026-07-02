@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('mdas', {
   listTranslations: (lang) => ipcRenderer.invoke('translation:listTranslations', lang),
   clearTranslations: (lang) => ipcRenderer.invoke('translation:clearTranslations', lang),
   downloadFile: (payload) => ipcRenderer.invoke('translation:downloadFile', payload),
+  reformatWithAI: (payload) => ipcRenderer.invoke('translation:reformatWithAI', payload),
+  polishLanguage: (payload) => ipcRenderer.invoke('translation:polishLanguage', payload),
+  openStorageFolder: (lang) => ipcRenderer.invoke('translation:openStorageFolder', lang),
   listIncoming: () => ipcRenderer.invoke('translation:listPending'),
 
   // ── Bug reports ───────────────────────────────────────────────────────────

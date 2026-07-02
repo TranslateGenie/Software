@@ -8,12 +8,108 @@ import {
   getTranslationMetadata,
   getTranslationFileBuffer,
   clearTranslationsForLanguage,
+  updateTranslationMetadata,
+  writeTranslationFile,
 } from '../lib/user-storage.js';
 import { resolveLicenseFromBearer } from './validate-license.js';
 
 const AZURE_TRANSLATOR_KEY = process.env.AZURE_TRANSLATOR_KEY || '';
 const AZURE_TRANSLATOR_REGION = process.env.AZURE_TRANSLATOR_REGION || '';
 const AZURE_TRANSLATOR_ENDPOINT = process.env.AZURE_TRANSLATOR_ENDPOINT || 'https://api.cognitive.microsofttranslator.com';
+
+// Azure Document Intelligence (Layout model) powers the premium "AI Format Polish" reformat.
+const DOCUMENT_INTELLIGENCE_ENDPOINT = process.env.DOCUMENT_INTELLIGENCE_ENDPOINT || '';
+const DOCUMENT_INTELLIGENCE_KEY = process.env.DOCUMENT_INTELLIGENCE_KEY || '';
+const REFORMAT_CHARS_PER_PAGE = 2000;
+
+// Azure OpenAI (gpt-5-mini) powers the premium "AI Language Polish" — rewrites the already-
+// translated text to read natively, without re-translating. Uses the v1 chat-completions surface
+// (deployment passed as `model`), which the gpt-5 family requires; gpt-5 models also reject
+// custom `temperature`, so none is sent.
+const AZURE_OPENAI_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || '';
+const AZURE_OPENAI_KEY = process.env.AZURE_OPENAI_KEY || '';
+const AZURE_OPENAI_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-5-mini';
+const POLISH_CHARS_PER_PAGE = 1000;
+// Non-PDF docs have no page count, so a "page" is estimated as this many translated characters.
+const POLISH_PAGE_ESTIMATE_CHARS = 3000;
+
+const POLISH_SYSTEM_PROMPT =
+  'You are a professional copy editor. Improve the fluency and naturalness of the user\'s text so ' +
+  'it reads as if originally written by a native speaker of whatever language it is in. Preserve ' +
+  'the meaning exactly. Do not translate into another language. Do not add, remove, or reorder ' +
+  'information. If the text contains markup tags (such as <span id="0">), timestamps, code, ' +
+  'numbers, or placeholders, keep them exactly where they are and only improve the natural-language ' +
+  'text around them. Reply with ONLY the improved text — no commentary, no quotes.';
+
+// Polishes each text through Azure OpenAI chat completions with bounded concurrency.
+// Per-item transient failures fall back to the original text (a partially polished document is
+// better than a failed one); config/auth failures (401/403/404) abort the whole run.
+async function callAzureOpenAIPolish(texts) {
+  if (!AZURE_OPENAI_ENDPOINT || !AZURE_OPENAI_KEY) {
+    throw new Error('Azure OpenAI is not configured. Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY.');
+  }
+  // Normalize whatever endpoint shape the Azure/Foundry portal was copied from — a bare resource
+  // endpoint, a full target URI with an /openai/... path + api-version, or the /models inference
+  // endpoint — down to the resource base before appending the v1 chat-completions path.
+  const base = AZURE_OPENAI_ENDPOINT
+    .replace(/[?#].*$/, '')
+    .replace(/\/(openai|models)(\/.*)?$/, '')
+    .replace(/\/+$/, '');
+  const url = `${base}/openai/v1/chat/completions`;
+  // 'minimal' reasoning keeps gpt-5-family latency/cost right for a copy-edit task; omitted for
+  // non-gpt-5 deployment names, where the parameter would be rejected.
+  const isGpt5 = /^gpt-5/i.test(AZURE_OPENAI_DEPLOYMENT);
+
+  const polishOne = async (text) => {
+    if (!text || !String(text).trim()) return text;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': AZURE_OPENAI_KEY },
+      body: JSON.stringify({
+        model: AZURE_OPENAI_DEPLOYMENT,
+        messages: [
+          { role: 'system', content: POLISH_SYSTEM_PROMPT },
+          { role: 'user', content: String(text) },
+        ],
+        ...(isGpt5 ? { reasoning_effort: 'minimal' } : {}),
+      }),
+    });
+    if (response.status === 401 || response.status === 403 || response.status === 404) {
+      const detail = await response.text();
+      const err = new Error(detail || `Azure OpenAI request failed (${response.status}).`);
+      err.fatal = true;
+      throw err;
+    }
+    if (!response.ok) throw new Error(`Azure OpenAI transient error (${response.status}).`);
+    const data = await response.json();
+    const choice = data?.choices?.[0];
+    const out = choice?.message?.content;
+    // Content-filtered or empty responses keep the original text untouched.
+    if (!out || choice?.finish_reason === 'content_filter') return text;
+    return out;
+  };
+
+  const results = new Array(texts.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(5, texts.length) }, async () => {
+    while (next < texts.length) {
+      const i = next++;
+      try {
+        results[i] = await polishOne(texts[i]);
+      } catch (err) {
+        if (err.fatal) throw err;
+        try {
+          results[i] = await polishOne(texts[i]); // one retry, then keep the original
+        } catch (err2) {
+          if (err2.fatal) throw err2;
+          results[i] = texts[i];
+        }
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 const TEXT_EXTENSIONS = new Set([
   '.txt', '.md', '.mdx', '.markdown', '.rst', '.tex', '.rtf',
@@ -124,7 +220,10 @@ const XLSX_INLINE_CFG = { ...XLSX_CFG, paraTag: 'is' };
 // Accepts an array of XML strings (e.g. all PPTX slides) so translation batches across them.
 // Returns { parts, characters } where characters is the raw visible text count (the words,
 // not the run markup) — that is what the customer is charged for.
-async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguage, budget) {
+// `transform` (optional) replaces the Azure-translate step with any texts→texts function (e.g.
+// the GPT language polish); it receives the span-tagged HTML segments and must return them in
+// order with the <span id> markup preserved where possible (the rebuild falls back gracefully).
+async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguage, budget, transform = null) {
   const { ns, prefix, paraTag, runTag, rPrTag, textTag } = config;
   // @xmldom/xmldom ≥ 0.9 throws (not just warns) when an XML declaration isn't the
   // very first byte — triggered by a UTF-8 BOM that some OOXML generators prepend.
@@ -218,9 +317,15 @@ async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguag
   enforceBudget(characters, budget);
 
   if (jobs.length) {
-    const translated = [];
-    for (const chunk of chunkTexts(jobs.map((j) => j.html))) {
-      translated.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage, 'html'));
+    const htmls = jobs.map((j) => j.html);
+    let translated;
+    if (transform) {
+      translated = await transform(htmls);
+    } else {
+      translated = [];
+      for (const chunk of chunkTexts(htmls)) {
+        translated.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage, 'html'));
+      }
     }
     jobs.forEach((job, i) => job.rebuild(translated[i] ?? ''));
   }
@@ -232,7 +337,7 @@ async function translateOoxmlParts(xmlParts, config, targetLanguage, fromLanguag
 // batched pass and writes each result back to the same part. Returns the summed visible-text
 // `characters`. Parts that don't exist are silently skipped, so callers can list optional parts
 // (headers, footnotes, speaker notes, …) without first checking for them.
-async function translateZipParts(zip, namePattern, config, targetLanguage, fromLanguage, budget) {
+async function translateZipParts(zip, namePattern, config, targetLanguage, fromLanguage, budget, transform = null) {
   const names = Object.keys(zip.files).filter((name) => namePattern.test(name)).sort();
   if (names.length === 0) return 0;
 
@@ -242,6 +347,7 @@ async function translateZipParts(zip, namePattern, config, targetLanguage, fromL
     targetLanguage,
     fromLanguage,
     budget,
+    transform,
   );
   names.forEach((name, i) => zip.file(name, parts[i]));
   return characters;
@@ -305,7 +411,7 @@ async function translateXlsx(inputBuffer, targetLanguage, fromLanguage, budget) 
   return { buffer: Buffer.from(zip.generate({ type: 'nodebuffer' })), characters };
 }
 
-async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipBlock, budget) {
+async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipBlock, budget, transform = null) {
   const blocks = text.split(/\r?\n\r?\n/);
 
   const cueData = [];
@@ -326,9 +432,15 @@ async function translateSubtitleBlocks(text, targetLanguage, fromLanguage, skipB
   const characters = cueData.reduce((sum, c) => sum + c.text.length, 0);
   enforceBudget(characters, budget);
 
-  const translations = [];
-  for (const chunk of chunkTexts(cueData.map((c) => c.text))) {
-    translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
+  const cueTexts = cueData.map((c) => c.text);
+  let translations;
+  if (transform) {
+    translations = await transform(cueTexts);
+  } else {
+    translations = [];
+    for (const chunk of chunkTexts(cueTexts)) {
+      translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage));
+    }
   }
 
   const output = parsedBlocks.map((pb) => {
@@ -384,11 +496,13 @@ function buildPdfHtml(blocks, targetLanguage) {
 // whole document routes to the Chromium reflow path (which shapes text and supplies fonts):
 //   - RTL scripts need contextual joining + bidi reordering
 //   - Indic/Brahmic + SE-Asian scripts need glyph reordering and ligatures
-//   - CJK is shaping-free but needs large fonts — deferred until Noto CJK is bundled (v1)
-// Everything else (Latin/Cyrillic/Greek) draws glyph-by-glyph LTR and is overlay-safe.
+// Overlay-safe scripts draw glyph-by-glyph LTR and only need a bundled font: Latin/Cyrillic/Greek
+// (Noto Sans) and Simplified Chinese (Noto Sans SC — CJK is shaping-free). Traditional Chinese,
+// Japanese, and Korean stay deferred until their fonts are bundled too (same mechanism, more
+// font files). The Electron renderer must have a font for every language marked overlay-safe here.
 const OVERLAY_UNSAFE_LANGS = new Set([
   'ar', 'fa', 'ur', 'he', 'yi', 'dv', 'ps', 'sd', 'ckb', 'ug',          // RTL
-  'zh', 'zh-hans', 'zh-hant', 'ja', 'ko', 'yue',                        // CJK (deferred)
+  'zh-hant', 'zh-tw', 'zh-hk', 'zh-mo', 'ja', 'ko', 'yue',             // CJK not yet bundled (Traditional/JP/KR)
   'hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'si', 'ne',    // Indic
   'mr', 'as', 'sa', 'th', 'lo', 'km', 'my', 'bo', 'dz', 'am', 'ti',    // Indic / SE-Asian
 ]);
@@ -464,6 +578,7 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
     useSystemFonts: true,
   }).promise;
 
+  const pageCount = pdfDoc.numPages;
   const overlaySafe = isOverlaySafeLang(targetLanguage);
   const BULLET = /^[•·∙●○▪▸►→\-\*]\s/;
 
@@ -580,11 +695,34 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
   }
   allBlocks.forEach((b, i) => { b.translated = translations[i] ?? b.text; });
 
+  // Sidecar = the per-document translation memory + geometry + page routing, persisted on-device
+  // so the paid AI Polish actions can rebuild output WITHOUT re-running translation:
+  //  - Format polish (Azure DI) uses blocks as a source→translated TM.
+  //  - Language polish rewrites blocks[].translated and re-renders using pages[].mode routing.
+  // Block coords are native PDF space (bottom-left origin), matching pdf-lib.
+  const sidecar = {
+    pageCount: pageData.length,
+    pages: pageData.map((p) => ({ page: p.pageNum, mode: p.mode })),
+    blocks: pageData.flatMap((page) =>
+      page.blocks.map((b) => ({
+        source: b.text,
+        translated: b.translated,
+        page: page.pageNum,
+        x: b.left,
+        y: b.bottom,
+        w: Math.max(0, b.right - b.left),
+        h: Math.max(0, b.top - b.bottom),
+        fontSize: b.fontSize,
+        type: b.type,
+      })),
+    ),
+  };
+
   // Fast path: when every page reflows (e.g. a complex-script target), return one combined HTML
   // document and let Electron render it in a single Chromium pass — no pdf-lib, no original-PDF
   // round-trip. This is the same cheap path the pipeline used before overlay support.
   if (pageData.every((p) => p.mode === 'reflow')) {
-    return { pdf: { allReflowHtml: buildPdfHtml(allBlocks, targetLanguage) }, characters };
+    return { pdf: { allReflowHtml: buildPdfHtml(allBlocks, targetLanguage) }, sidecar, pageCount, characters };
   }
 
   // Mixed/overlay document: structured per-page payload. Overlay pages carry cover boxes +
@@ -604,23 +742,27 @@ async function translatePdf(inputBuffer, targetLanguage, fromLanguage, budget) {
   });
 
   return {
-    pdf: { originalPdfBase64: inputBuffer.toString('base64'), pages },
+    // targetLanguage lets the Electron overlay renderer pick the right embedded font
+    // (e.g. Noto Sans SC for Simplified Chinese vs Noto Sans for Latin/Cyrillic/Greek).
+    pdf: { originalPdfBase64: inputBuffer.toString('base64'), pages, targetLanguage },
+    sidecar,
+    pageCount,
     characters,
   };
 }
 
-async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget) {
-  return translateSubtitleBlocks(inputBuffer.toString('utf8'), targetLanguage, fromLanguage, null, budget);
+async function translateSrt(inputBuffer, targetLanguage, fromLanguage, budget, transform = null) {
+  return translateSubtitleBlocks(inputBuffer.toString('utf8'), targetLanguage, fromLanguage, null, budget, transform);
 }
 
-async function translateVtt(inputBuffer, targetLanguage, fromLanguage, budget) {
+async function translateVtt(inputBuffer, targetLanguage, fromLanguage, budget, transform = null) {
   return translateSubtitleBlocks(inputBuffer.toString('utf8'), targetLanguage, fromLanguage, (block) => {
     const t = block.trim();
     return t === 'WEBVTT' || t.startsWith('WEBVTT ') || t.startsWith('NOTE') || t.startsWith('STYLE') || t.startsWith('REGION');
-  }, budget);
+  }, budget, transform);
 }
 
-async function translateEpub(inputBuffer, targetLanguage, fromLanguage, budget) {
+async function translateEpub(inputBuffer, targetLanguage, fromLanguage, budget, transform = null) {
   const zip = new PizZip(inputBuffer);
   const parser = new DOMParser();
   const serializer = new XMLSerializer();
@@ -728,9 +870,15 @@ async function translateEpub(inputBuffer, targetLanguage, fromLanguage, budget) 
   // Send inner HTML to Azure with textType=html (batched across all chapters) so inline tags
   // like <em>/<strong>/<a> are preserved and repositioned in the translated text.
   if (blockData.length) {
-    const translations = [];
-    for (const chunk of chunkTexts(blockData.map((d) => d.html))) {
-      translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage, 'html'));
+    const blockHtmls = blockData.map((d) => d.html);
+    let translations;
+    if (transform) {
+      translations = await transform(blockHtmls);
+    } else {
+      translations = [];
+      for (const chunk of chunkTexts(blockHtmls)) {
+        translations.push(...await callAzureTranslate(chunk, targetLanguage, fromLanguage, 'html'));
+      }
     }
     blockData.forEach(({ el, doc }, idx) => setInnerXML(el, doc, translations[idx] ?? ''));
   }
@@ -753,6 +901,16 @@ function normalizeTranslationMeta(meta) {
     inputBytes: Number(meta?.inputBytes || 0),
     outputBytes: Number(meta?.outputBytes || 0),
     charactersCharged: Number(meta?.charactersCharged || 0),
+    mode: String(meta?.mode || ''),
+    pageCount: Number(meta?.pageCount || 0),
+    // The UI uses these to drive the "AI Polish" dropdown (Format is PDF-only) and badges.
+    reformatEligible: Boolean(meta?.sidecarKey && meta?.inputKey && meta?.mode === 'pdf-translation'),
+    polishEligible: Boolean(
+      meta?.mode && meta.mode !== 'binary-pass-through' &&
+      (meta.mode !== 'pdf-translation' || meta?.sidecarKey),
+    ),
+    aiFormatted: Boolean(meta?.formattedOutputKey),
+    aiPolished: Boolean(meta?.languagePolishedOutputKey),
   };
 }
 
@@ -805,25 +963,20 @@ export async function translateHandler(req, res) {
       (isDocx || isPptx || isXlsx || isPdf || isSrt || isVtt || isEpub || isTextFile);
 
     const rec = resolved.record;
-    const reqLimit  = Number(rec.limit || 0);
-    const reqUsed   = Number(rec.requests || 0);
     const charLimit = Number(rec.charLimit || 0);
     const charUsed  = Number(rec.characters || 0);
     const budget = charLimit > 0 ? Math.max(0, charLimit - charUsed) : null;
 
-    if (willTranslate && reqLimit > 0 && reqUsed >= reqLimit) {
-      return res.status(402).json({
-        ok: false,
-        error: 'request-limit-exceeded',
-        message: 'Your license has reached its request limit.',
-      });
-    }
+    // Documents are unlimited — licenses are metered by characters only. The per-request/document
+    // limit is no longer enforced (the `requests` counter is still incremented below for tracking).
 
     let outputBuffer = inputBuffer;
     let outputFileName = fileName;
     let mode = 'binary-pass-through';
     let charactersCharged = 0;
     let pdfPayload = null;
+    let pdfSidecar = null;
+    let pdfPageCount = null;
 
     try {
       if (AZURE_TRANSLATOR_KEY) {
@@ -839,6 +992,8 @@ export async function translateHandler(req, res) {
         } else if (isPdf) {
           const pdfResult = await translatePdf(inputBuffer, targetLanguage, fromLanguage, budget);
           charactersCharged = pdfResult.characters;
+          pdfSidecar = pdfResult.sidecar || null;
+          pdfPageCount = pdfResult.pageCount || null;
           if (pdfResult.pdf) {
             pdfPayload = pdfResult.pdf;
             // Placeholder so storeTranslationAssets creates the directory and metadata.
@@ -883,14 +1038,18 @@ export async function translateHandler(req, res) {
       translationId,
       targetLanguage,
       fileName: outputFileName,
-      inputBuffer,
+      // Persist the original + sidecar only for reformat-eligible PDFs (avoids storing every
+      // Office/text original on-device). Both are gated on the PDF sidecar existing.
+      inputBuffer: pdfSidecar ? inputBuffer : undefined,
       outputBuffer,
+      sidecar: pdfSidecar || undefined,
       metadata: {
         mimeType,
         mode,
         inputBytes: inputBuffer.length,
         outputBytes: outputBuffer.length,
         charactersCharged,
+        ...(pdfPageCount ? { pageCount: pdfPageCount } : {}),
       },
     });
 
@@ -991,12 +1150,372 @@ export async function getTranslationFileHandler(req, res) {
     }
 
     const metadata = await getTranslationMetadata(resolved.record.org, lang, id);
-    const { buffer, contentType } = await getTranslationFileBuffer(metadata.outputKey);
+
+    // Serve the newest AI artifact first (a later Language polish should beat an earlier Format
+    // polish and vice versa), falling back to the original translation if a file is missing.
+    const candidates = [
+      metadata.formattedOutputKey && { key: metadata.formattedOutputKey, at: Date.parse(metadata.reformattedAt || 0) || 0 },
+      metadata.languagePolishedOutputKey && { key: metadata.languagePolishedOutputKey, at: Date.parse(metadata.polishedAt || 0) || 0 },
+    ].filter(Boolean).sort((a, b) => b.at - a.at);
+
+    let buffer;
+    let contentType;
+    for (const candidate of candidates) {
+      try { ({ buffer, contentType } = await getTranslationFileBuffer(candidate.key)); break; } catch {}
+    }
+    if (!buffer) ({ buffer, contentType } = await getTranslationFileBuffer(metadata.outputKey));
 
     res.setHeader('Content-Type', contentType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${metadata.fileName}"`);
     return res.status(200).send(buffer);
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Failed to load translation output file.' });
+  }
+}
+
+// ── "Format With AI" — Azure Document Intelligence reformat ──────────────────────
+
+const normalizeTM = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+// Converts a DI bounding polygon (flat [x1,y1,...], top-left origin, page unit = inches for PDF)
+// into a pdf-lib run box (points, bottom-left origin) on a page `pageHeightIn` inches tall.
+function diPolygonToRun(polygon, pageHeightIn) {
+  const xs = polygon.filter((_, i) => i % 2 === 0);
+  const ys = polygon.filter((_, i) => i % 2 === 1);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return {
+    x: minX * 72,
+    y: (pageHeightIn - maxY) * 72,   // bottom edge, flipped to bottom-left origin
+    w: Math.max(0, (maxX - minX) * 72),
+    h: Math.max(0, (maxY - minY) * 72),
+  };
+}
+
+// Runs Azure DI Layout on a PDF and returns normalized pages + paragraphs (in reading order).
+async function runDocumentIntelligenceLayout(pdfBuffer) {
+  const { default: DocumentIntelligence, getLongRunningPoller, isUnexpected } =
+    await import('@azure-rest/ai-document-intelligence');
+  const client = DocumentIntelligence(DOCUMENT_INTELLIGENCE_ENDPOINT, { key: DOCUMENT_INTELLIGENCE_KEY });
+
+  const initial = await client
+    .path('/documentModels/{modelId}:analyze', 'prebuilt-layout')
+    .post({ contentType: 'application/json', body: { base64Source: pdfBuffer.toString('base64') } });
+  if (isUnexpected(initial)) {
+    throw new Error(initial.body?.error?.message || `Document Intelligence analyze failed (${initial.status}).`);
+  }
+
+  const poller = getLongRunningPoller(client, initial);
+  const analyzeResult = (await poller.pollUntilDone()).body?.analyzeResult || {};
+  const pages = (analyzeResult.pages || []).map((p) => ({
+    pageNumber: p.pageNumber, width: p.width, height: p.height, unit: p.unit,
+  }));
+  const paragraphs = (analyzeResult.paragraphs || [])
+    .map((par) => {
+      const region = par.boundingRegions?.[0];
+      return region ? { content: par.content, page: region.pageNumber, polygon: region.polygon } : null;
+    })
+    .filter(Boolean);
+  return { pages, paragraphs };
+}
+
+export async function reformatHandler(req, res) {
+  try {
+    const resolved = await resolveLicenseFromBearer(req);
+    if (!resolved.valid || !resolved.record) {
+      return res.status(401).json({ ok: false, error: resolved.reason || 'invalid-license' });
+    }
+    const { translationId, lang } = req.body || {};
+    if (!translationId || !lang) {
+      return res.status(400).json({ ok: false, error: 'translationId and lang are required.' });
+    }
+    if (!DOCUMENT_INTELLIGENCE_ENDPOINT || !DOCUMENT_INTELLIGENCE_KEY) {
+      return res.status(503).json({ ok: false, error: 'di-not-configured', message: 'AI formatting is not configured.' });
+    }
+
+    const org = resolved.record.org;
+    const meta = await getTranslationMetadata(org, lang, translationId);
+    if (meta.mode !== 'pdf-translation' || !meta.sidecarKey || !meta.inputKey) {
+      return res.status(400).json({
+        ok: false,
+        error: 'reformat-unavailable',
+        message: 'This document cannot be AI-formatted (only PDFs translated by this app version).',
+      });
+    }
+
+    const { buffer: originalPdf } = await getTranslationFileBuffer(meta.inputKey);
+    const { buffer: sidecarBuf } = await getTranslationFileBuffer(meta.sidecarKey);
+    const sidecar = JSON.parse(sidecarBuf.toString('utf8'));
+
+    // Page count → flat cost, enforced before any DI call.
+    const pageCount = Number(sidecar.pageCount || 0);
+    if (!pageCount || !Array.isArray(sidecar.blocks)) {
+      return res.status(400).json({ ok: false, error: 'reformat-unavailable', message: 'This document was translated by an older version and cannot be AI-formatted.' });
+    }
+
+    const cost = pageCount * REFORMAT_CHARS_PER_PAGE;
+    const charLimit = Number(resolved.record.charLimit || 0);
+    const charUsed = Number(resolved.record.characters || 0);
+    const remaining = charLimit > 0 ? Math.max(0, charLimit - charUsed) : null;
+    if (remaining != null && cost > remaining) {
+      return res.status(402).json({
+        ok: false,
+        error: 'character-limit-exceeded',
+        message: `AI formatting needs ${cost.toLocaleString()} characters (${pageCount} pages × 2,000) but your license only has ${remaining.toLocaleString()} remaining.`,
+      });
+    }
+
+    // DI Layout → reading-ordered paragraphs with bounding polygons.
+    const di = await runDocumentIntelligenceLayout(originalPdf);
+
+    // Translation memory from the sidecar; re-place existing translations, translating only the
+    // occasional DI segment that wasn't in the sidecar (covered by the flat per-page charge).
+    const tm = new Map(sidecar.blocks.map((b) => [normalizeTM(b.source), { translated: b.translated, fontSize: b.fontSize }]));
+    const targetLanguage = meta.targetLanguage || lang;
+
+    const runsByPage = new Map();
+    for (const para of di.paragraphs) {
+      if (!para.content || !para.content.trim()) continue;
+      const pageInfo = di.pages.find((pg) => pg.pageNumber === para.page);
+      if (!pageInfo || !para.polygon) continue;
+
+      const hit = tm.get(normalizeTM(para.content));
+      let translated;
+      let fontSize;
+      if (hit) {
+        translated = hit.translated;
+        fontSize = hit.fontSize;
+      } else {
+        [translated] = await callAzureTranslate([para.content], targetLanguage, '');
+      }
+      const box = diPolygonToRun(para.polygon, pageInfo.height);
+      if (!fontSize) fontSize = Math.max(8, Math.min(14, box.h || 12));
+
+      if (!runsByPage.has(para.page)) runsByPage.set(para.page, []);
+      runsByPage.get(para.page).push({ ...box, fontSize, translated });
+    }
+
+    const pages = [];
+    for (let p = 1; p <= pageCount; p++) {
+      pages.push({ mode: 'overlay', runs: runsByPage.get(p) || [] });
+    }
+
+    // Charge the flat per-page cost (DI succeeded; render happens on the Electron side next).
+    const usageRecord = await incrementLicenseUsage(resolved.licenseKey, 0, cost);
+
+    const formattedOutputKey = `translations/output/${org}/${lang}/${translationId}/ai-formatted-${meta.fileName}`;
+    await updateTranslationMetadata(org, lang, translationId, {
+      formattedOutputKey,
+      reformattedAt: new Date().toISOString(),
+    });
+
+    return res.status(200).json({
+      ok: true,
+      formattedOutputKey,
+      pages: pageCount,
+      charactersCharged: cost,
+      pdf: { originalPdfBase64: originalPdf.toString('base64'), pages, targetLanguage },
+      usage: {
+        requests: Number(usageRecord.requests || 0),
+        limit: Number(usageRecord.limit || 0),
+        characters: Number(usageRecord.characters || 0),
+        charLimit: Number(usageRecord.charLimit || 0),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'AI formatting failed.' });
+  }
+}
+
+// Modes whose output can be run through the AI Language Polish. PDF additionally requires a
+// sidecar (the polish rewrites sidecar segments and re-renders); binary pass-throughs can't be
+// polished at all.
+const POLISHABLE_MODES = new Set([
+  'pdf-translation', 'docx-translation', 'pptx-translation', 'xlsx-translation',
+  'epub-translation', 'srt-translation', 'vtt-translation', 'azure-text-translation',
+]);
+
+// Splits plain text into ~maxLen chunks on line boundaries (separators stay inside chunks, so
+// joining the polished chunks with '' reassembles the document).
+function splitTextIntoChunks(text, maxLen) {
+  const pieces = String(text).split(/(\r?\n)/);
+  const chunks = [];
+  let cur = '';
+  for (const piece of pieces) {
+    if (cur && cur.length + piece.length > maxLen) { chunks.push(cur); cur = ''; }
+    cur += piece;
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : [''];
+}
+
+// "AI Language Polish" — passes the already-translated output through Azure OpenAI so the wording
+// reads natively. No re-translation; charged at pages × 1,000 characters (pages estimated from
+// text volume for non-PDF formats). Non-destructive: writes a lang-polished output file.
+export async function polishHandler(req, res) {
+  try {
+    const resolved = await resolveLicenseFromBearer(req);
+    if (!resolved.valid || !resolved.record) {
+      return res.status(401).json({ ok: false, error: resolved.reason || 'invalid-license' });
+    }
+    const { translationId, lang } = req.body || {};
+    if (!translationId || !lang) {
+      return res.status(400).json({ ok: false, error: 'translationId and lang are required.' });
+    }
+    if (!AZURE_OPENAI_ENDPOINT || !AZURE_OPENAI_KEY) {
+      return res.status(503).json({ ok: false, error: 'polish-not-configured', message: 'AI language polishing is not configured.' });
+    }
+
+    const org = resolved.record.org;
+    const meta = await getTranslationMetadata(org, lang, translationId);
+    const mode = String(meta.mode || '');
+    if (!POLISHABLE_MODES.has(mode) || (mode === 'pdf-translation' && !meta.sidecarKey)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'polish-unavailable',
+        message: 'This document cannot be language-polished (unsupported type or translated by an older version).',
+      });
+    }
+
+    const charLimit = Number(resolved.record.charLimit || 0);
+    const charUsed = Number(resolved.record.characters || 0);
+    const remaining = charLimit > 0 ? Math.max(0, charLimit - charUsed) : null;
+
+    // Text-volume charging for non-PDF formats: the transform sees every segment before any
+    // OpenAI call, accumulates the char total, and enforces the budget on the derived page cost.
+    let computedCost = null;
+    const seen = { chars: 0 };
+    const stripMarkup = (s) => String(s).replace(/<[^>]+>/g, '');
+    const budgetedPolish = async (texts) => {
+      seen.chars += texts.reduce((sum, t) => sum + stripMarkup(t).length, 0);
+      computedCost = Math.max(1, Math.ceil(seen.chars / POLISH_PAGE_ESTIMATE_CHARS)) * POLISH_CHARS_PER_PAGE;
+      if (remaining != null && computedCost > remaining) throw new CharLimitError(computedCost);
+      return callAzureOpenAIPolish(texts);
+    };
+
+    const targetLanguage = meta.targetLanguage || lang;
+    let pdfRenderPayload = null;
+    let polishedBuffer = null;
+
+    if (mode === 'pdf-translation') {
+      const { buffer: sidecarBuf } = await getTranslationFileBuffer(meta.sidecarKey);
+      const sidecar = JSON.parse(sidecarBuf.toString('utf8'));
+      if (!sidecar.pageCount || !Array.isArray(sidecar.blocks)) {
+        return res.status(400).json({ ok: false, error: 'polish-unavailable', message: 'This document was translated by an older version and cannot be polished.' });
+      }
+
+      computedCost = sidecar.pageCount * POLISH_CHARS_PER_PAGE;
+      if (remaining != null && computedCost > remaining) {
+        return res.status(402).json({
+          ok: false,
+          error: 'character-limit-exceeded',
+          message: `AI language polishing needs ${computedCost.toLocaleString()} characters (${sidecar.pageCount} pages × 1,000) but your license only has ${remaining.toLocaleString()} remaining.`,
+        });
+      }
+
+      const polished = await callAzureOpenAIPolish(sidecar.blocks.map((b) => b.translated));
+      sidecar.blocks.forEach((b, i) => { b.translated = polished[i] ?? b.translated; });
+
+      // Rebuild the render payload using the original per-page overlay/reflow routing.
+      const modeByPage = new Map((sidecar.pages || []).map((p) => [p.page, p.mode]));
+      const blocksByPage = new Map();
+      for (const b of sidecar.blocks) {
+        if (!blocksByPage.has(b.page)) blocksByPage.set(b.page, []);
+        blocksByPage.get(b.page).push(b);
+      }
+
+      if ((sidecar.pages || []).every((p) => p.mode === 'reflow')) {
+        pdfRenderPayload = { allReflowHtml: buildPdfHtml(sidecar.blocks, targetLanguage), targetLanguage };
+      } else {
+        if (!meta.inputKey) {
+          return res.status(400).json({ ok: false, error: 'polish-unavailable', message: 'The original PDF is no longer available for this document.' });
+        }
+        const { buffer: originalPdf } = await getTranslationFileBuffer(meta.inputKey);
+        const pages = [];
+        for (let p = 1; p <= sidecar.pageCount; p++) {
+          const blocks = blocksByPage.get(p) || [];
+          if (modeByPage.get(p) === 'overlay') {
+            pages.push({
+              mode: 'overlay',
+              runs: blocks.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h, fontSize: b.fontSize, translated: b.translated })),
+            });
+          } else {
+            pages.push({ mode: 'reflow', html: buildPdfHtml(blocks, targetLanguage) });
+          }
+        }
+        pdfRenderPayload = { originalPdfBase64: originalPdf.toString('base64'), pages, targetLanguage };
+      }
+
+      // Persist the polished sidecar so a later Format polish (DI) composes on the polished text.
+      await writeTranslationFile(meta.sidecarKey, Buffer.from(JSON.stringify(sidecar)));
+    } else {
+      const { buffer: outBuf } = await getTranslationFileBuffer(meta.outputKey);
+
+      if (mode === 'docx-translation') {
+        const zip = new PizZip(outBuf);
+        await translateZipParts(zip, /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/, DOCX_CFG, targetLanguage, '', null, budgetedPolish);
+        polishedBuffer = Buffer.from(zip.generate({ type: 'nodebuffer' }));
+      } else if (mode === 'pptx-translation') {
+        const zip = new PizZip(outBuf);
+        await translateZipParts(zip, /^ppt\/(slides\/slide\d+|notesSlides\/notesSlide\d+|diagrams\/data\d+)\.xml$/, PPTX_CFG, targetLanguage, '', null, budgetedPolish);
+        polishedBuffer = Buffer.from(zip.generate({ type: 'nodebuffer' }));
+      } else if (mode === 'xlsx-translation') {
+        const zip = new PizZip(outBuf);
+        await translateZipParts(zip, /^xl\/sharedStrings\.xml$/, XLSX_CFG, targetLanguage, '', null, budgetedPolish);
+        await translateZipParts(zip, /^xl\/worksheets\/sheet\d+\.xml$/, XLSX_INLINE_CFG, targetLanguage, '', null, budgetedPolish);
+        polishedBuffer = Buffer.from(zip.generate({ type: 'nodebuffer' }));
+      } else if (mode === 'epub-translation') {
+        ({ buffer: polishedBuffer } = await translateEpub(outBuf, targetLanguage, '', null, budgetedPolish));
+      } else if (mode === 'srt-translation') {
+        ({ buffer: polishedBuffer } = await translateSrt(outBuf, targetLanguage, '', null, budgetedPolish));
+      } else if (mode === 'vtt-translation') {
+        ({ buffer: polishedBuffer } = await translateVtt(outBuf, targetLanguage, '', null, budgetedPolish));
+      } else {
+        // azure-text-translation: whole-file text polish in line-bounded chunks.
+        const text = outBuf.toString('utf8');
+        if (!text.trim()) {
+          return res.status(400).json({ ok: false, error: 'polish-unavailable', message: 'This document has no text to polish.' });
+        }
+        const polished = await budgetedPolish(splitTextIntoChunks(text, 6000));
+        polishedBuffer = Buffer.from(polished.join(''), 'utf8');
+      }
+
+      if (computedCost == null) {
+        return res.status(400).json({ ok: false, error: 'polish-unavailable', message: 'This document has no text to polish.' });
+      }
+    }
+
+    const usageRecord = await incrementLicenseUsage(resolved.licenseKey, 0, computedCost);
+
+    const languagePolishedOutputKey = `translations/output/${org}/${lang}/${translationId}/lang-polished-${meta.fileName}`;
+    if (polishedBuffer) {
+      await writeTranslationFile(languagePolishedOutputKey, polishedBuffer);
+    }
+    await updateTranslationMetadata(org, lang, translationId, {
+      languagePolishedOutputKey,
+      polishedAt: new Date().toISOString(),
+    });
+
+    return res.status(200).json({
+      ok: true,
+      languagePolishedOutputKey,
+      charactersCharged: computedCost,
+      ...(pdfRenderPayload && { pdf: pdfRenderPayload }),
+      usage: {
+        requests: Number(usageRecord.requests || 0),
+        limit: Number(usageRecord.limit || 0),
+        characters: Number(usageRecord.characters || 0),
+        charLimit: Number(usageRecord.charLimit || 0),
+      },
+    });
+  } catch (error) {
+    if (error instanceof CharLimitError) {
+      return res.status(402).json({
+        ok: false,
+        error: 'character-limit-exceeded',
+        message: `AI language polishing needs ${error.rawChars.toLocaleString()} characters but your license does not have enough remaining.`,
+      });
+    }
+    return res.status(500).json({ ok: false, error: error.message || 'AI language polishing failed.' });
   }
 }

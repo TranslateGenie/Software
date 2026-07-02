@@ -85,6 +85,13 @@ async function waitForLocalHelperReady(maxAttempts = 120, intervalMs = 500) {
   throw new Error(`Local helper did not become ready at ${LICENSE_API_BASE_URL}.`);
 }
 
+// Translated documents live in a visible, permanent library folder (Documents/Translate Genie)
+// instead of the hidden app cache — users manage/delete files themselves via the folder button.
+// Both the backend helper (MDAS_USER_DATA_DIR) and the PDF renderer write under this base.
+function getLibraryDir() {
+  return path.join(app.getPath('documents'), 'Translate Genie');
+}
+
 async function startLocalHelperServer() {
   if (localHelperProcess && !localHelperProcess.killed) return;
 
@@ -92,6 +99,8 @@ async function startLocalHelperServer() {
   if (!existsSync(serverPath)) {
     throw new Error(`Local helper server not found at ${serverPath}.`);
   }
+
+  await fs.mkdir(getLibraryDir(), { recursive: true });
 
   const stderrBuffer = [];
 
@@ -101,7 +110,7 @@ async function startLocalHelperServer() {
       ELECTRON_RUN_AS_NODE: '1',
       HOST: LOCAL_HELPER_HOST,
       PORT: String(LOCAL_HELPER_PORT),
-      MDAS_USER_DATA_DIR: app.getPath('userData'),
+      MDAS_USER_DATA_DIR: getLibraryDir(),
     },
     stdio: 'pipe',
   });
@@ -743,28 +752,55 @@ async function htmlToPdfBuffer(htmlString) {
   }
 }
 
-// Path to the bundled Noto Sans (covers Latin/Cyrillic/Greek) used for the vector overlay.
-// In dev it sits next to main.js; in packaged builds it ships via the assets/fonts files glob.
-function overlayFontPath() {
-  return path.join(__dirname, 'assets', 'fonts', 'NotoSans-Regular.ttf');
+// Bundled overlay fonts live next to main.js in dev and ship via the assets/fonts files glob when
+// packaged. The font is chosen by target language: Simplified Chinese uses Noto Sans SC (CJK is
+// shaping-free, so pdf-lib draws it fine once embedded); everything else overlay-eligible
+// (Latin/Cyrillic/Greek) uses Noto Sans. The backend only routes a language here if it's in this
+// map — keep it in sync with the backend's OVERLAY_UNSAFE_LANGS. Add ja/ko/zh-Hant fonts here to
+// enable them.
+function overlayFontPath(targetLanguage) {
+  const script = String(targetLanguage || '').toLowerCase().split('-')[0];
+  const file = script === 'zh' ? 'NotoSansSC-Regular.otf' : 'NotoSans-Regular.ttf';
+  return path.join(__dirname, 'assets', 'fonts', file);
 }
 
-// Word-wraps text to a maximum width at a given font size.
+// True for scripts (CJK) that have no inter-word spaces and must break between characters.
+const CJK_CHAR = /[　-〿぀-ヿ㐀-䶿一-鿿가-힯豈-﫿＀-￯]/;
+
+// Word-wraps text to a maximum width. Latin text breaks on spaces; CJK text (no spaces) breaks
+// between characters. Mixed content is tokenized so each CJK glyph and each Latin word is its own
+// breakable unit — without this, a spaceless Chinese paragraph is one giant "word" that can't wrap,
+// forcing fitTextToBox to shrink it to an unreadable size.
 function wrapTextToWidth(text, font, size, maxWidth) {
-  const words = String(text).split(/\s+/).filter(Boolean);
-  const lines = [];
-  let cur = '';
-  for (const word of words) {
-    const candidate = cur ? `${cur} ${word}` : word;
-    if (!cur || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-      cur = candidate;
+  const units = [];
+  let buf = '';
+  for (const ch of String(text)) {
+    if (CJK_CHAR.test(ch)) {
+      if (buf) { units.push(buf); buf = ''; }
+      units.push(ch);
+    } else if (ch === ' ' || ch === '\t' || ch === '\n') {
+      units.push(`${buf} `);
+      buf = '';
     } else {
-      lines.push(cur);
-      cur = word;
+      buf += ch;
     }
   }
-  if (cur) lines.push(cur);
-  return lines;
+  if (buf) units.push(buf);
+
+  const lines = [];
+  let cur = '';
+  for (const u of units) {
+    const candidate = cur + u;
+    if (cur && font.widthOfTextAtSize(candidate.replace(/\s+$/, ''), size) > maxWidth) {
+      lines.push(cur.replace(/\s+$/, ''));
+      cur = u.replace(/^\s+/, '');
+    } else {
+      cur = candidate;
+    }
+  }
+  const last = cur.replace(/\s+$/, '');
+  if (last) lines.push(last);
+  return lines.length ? lines : [''];
 }
 
 // Auto-shrinks a translated run to fit its source box. Translation expansion is the main overlay
@@ -816,7 +852,7 @@ function drawOverlayRuns(page, runs, font) {
  * @param {string} outputKey - Relative path under app.getPath('userData') for the output PDF.
  */
 async function renderTranslatedPdf(payload, outputKey) {
-  const outputPath = path.join(app.getPath('userData'), outputKey);
+  const outputPath = path.join(getLibraryDir(), outputKey);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   // All-reflow fast path.
@@ -829,7 +865,7 @@ async function renderTranslatedPdf(payload, outputKey) {
   const srcDoc = await PDFDocument.load(Buffer.from(payload.originalPdfBase64, 'base64'));
   const outDoc = await PDFDocument.create();
   outDoc.registerFontkit(fontkit);
-  const font = await outDoc.embedFont(await fs.readFile(overlayFontPath()), { subset: true });
+  const font = await outDoc.embedFont(await fs.readFile(overlayFontPath(payload.targetLanguage)), { subset: true });
 
   for (let i = 0; i < payload.pages.length; i++) {
     const spec = payload.pages[i];
@@ -928,8 +964,133 @@ ipcMain.handle('translation:listTranslations', async (_event, lang) => {
         sha: item.id,
         lang,
         createdAt: item.createdAt,
+        pageCount: Number(item.pageCount || 0),
+        charactersCharged: Number(item.charactersCharged || 0),
+        reformatEligible: Boolean(item.reformatEligible),
+        polishEligible: Boolean(item.polishEligible),
+        aiFormatted: Boolean(item.aiFormatted),
+        aiPolished: Boolean(item.aiPolished),
       }))
     : [];
+});
+
+/**
+ * "AI Language Polish" — passes the already-translated document through Azure OpenAI so the
+ * wording reads natively. For PDFs the backend returns a render payload (the polished overlay);
+ * other formats are written server-side.
+ */
+ipcMain.handle('translation:polishLanguage', async (_event, { translationId, lang }) => {
+  const session = await readLicenseSession();
+  if (!session?.token || !session?.org) {
+    throw new Error('A valid license is required.');
+  }
+
+  let result;
+  try {
+    result = await requestLocalHelper('/api/polish', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({ translationId, lang }),
+    });
+  } catch (err) {
+    let message = err.message;
+    try { const parsed = JSON.parse(err.message); message = parsed.message || parsed.error || message; } catch {}
+    throw new Error(message);
+  }
+
+  if (result?.pdf && result?.languagePolishedOutputKey) {
+    await renderTranslatedPdf(result.pdf, result.languagePolishedOutputKey);
+  }
+
+  if (result?.usage) {
+    const updatedSession = {
+      ...session,
+      requests: Number(result.usage.requests ?? session.requests ?? 0),
+      limit: Number(result.usage.limit ?? session.limit ?? 0),
+      characters: Number(result.usage.characters ?? session.characters ?? 0),
+      charLimit: Number(result.usage.charLimit ?? session.charLimit ?? 0),
+      validatedAt: Date.now(),
+    };
+    await saveLicenseSession(updatedSession);
+    persistStoreLicense(updatedSession);
+  }
+
+  return { ok: true, charactersCharged: result.charactersCharged };
+});
+
+/**
+ * Opens the user's translated-documents folder in the OS file manager. Documents are permanent —
+ * the user deletes files from here themselves if they want to.
+ */
+ipcMain.handle('translation:openStorageFolder', async (_event, lang) => {
+  const session = await readLicenseSession();
+  const base = getLibraryDir();
+  const candidates = [];
+  if (session?.org && lang) candidates.push(path.join(base, 'translations', 'output', session.org, String(lang)));
+  if (session?.org) candidates.push(path.join(base, 'translations', 'output', session.org));
+  candidates.push(base);
+
+  for (const dir of candidates) {
+    if (existsSync(dir)) {
+      const error = await shell.openPath(dir);
+      if (!error) return { ok: true, path: dir };
+    }
+  }
+  await fs.mkdir(base, { recursive: true });
+  const error = await shell.openPath(base);
+  if (error) throw new Error(error);
+  return { ok: true, path: base };
+});
+
+/**
+ * "Format With AI" — run the stored original through Azure Document Intelligence and re-place the
+ * existing translations into the reconstructed layout. The backend charges characters and returns
+ * a pdf payload; we render it (non-destructively) to the formatted output file.
+ */
+ipcMain.handle('translation:reformatWithAI', async (_event, { translationId, lang }) => {
+  const session = await readLicenseSession();
+  if (!session?.token || !session?.org) {
+    throw new Error('A valid license is required.');
+  }
+
+  let result;
+  try {
+    result = await requestLocalHelper('/api/reformat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({ translationId, lang }),
+    });
+  } catch (err) {
+    // requestLocalHelper throws the raw response body — surface the friendly message.
+    let message = err.message;
+    try { const parsed = JSON.parse(err.message); message = parsed.message || parsed.error || message; } catch {}
+    throw new Error(message);
+  }
+
+  if (result?.pdf && result?.formattedOutputKey) {
+    await renderTranslatedPdf(result.pdf, result.formattedOutputKey);
+  }
+
+  if (result?.usage) {
+    const updatedSession = {
+      ...session,
+      requests: Number(result.usage.requests ?? session.requests ?? 0),
+      limit: Number(result.usage.limit ?? session.limit ?? 0),
+      characters: Number(result.usage.characters ?? session.characters ?? 0),
+      charLimit: Number(result.usage.charLimit ?? session.charLimit ?? 0),
+      validatedAt: Date.now(),
+    };
+    await saveLicenseSession(updatedSession);
+    persistStoreLicense(updatedSession);
+  }
+
+  return { ok: true, pages: result.pages, charactersCharged: result.charactersCharged };
 });
 
 ipcMain.handle('translation:clearTranslations', async (_event, lang) => {

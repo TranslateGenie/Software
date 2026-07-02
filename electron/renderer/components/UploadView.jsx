@@ -31,13 +31,11 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
   const [fromLang, setFromLang] = useState('');       // '' = auto-detect
   const [toLang, setToLang] = useState('en');
 
-  const limit = Number(licenseSession?.limit ?? 0);
-  const requests = Number(licenseSession?.requests ?? 0);
+  // Licenses are metered by characters only — documents are unlimited.
   const charLimit = Number(licenseSession?.charLimit ?? 0);
   const characters = Number(licenseSession?.characters ?? 0);
-  const remainingRequests = Math.max(0, limit - requests);
   const remainingCharacters = Math.max(0, charLimit - characters);
-  const quotaReached = remainingRequests <= 0 || remainingCharacters <= 0;
+  const quotaReached = remainingCharacters <= 0;
 
   const handleFilesAdded = useCallback((newFiles) => {
     const entries = newFiles.map((file) => ({
@@ -74,26 +72,20 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
       return;
     }
 
-    const refreshedLimit = Number(effectiveSession?.limit ?? 0);
-    const refreshedRequests = Number(effectiveSession?.requests ?? 0);
     const refreshedCharLimit = Number(effectiveSession?.charLimit ?? 0);
     const refreshedCharacters = Number(effectiveSession?.characters ?? 0);
-    const refreshedRemainingRequests = Math.max(0, refreshedLimit - refreshedRequests);
     const refreshedRemainingCharacters = Math.max(0, refreshedCharLimit - refreshedCharacters);
-    const refreshedQuotaReached = refreshedRemainingRequests <= 0 || refreshedRemainingCharacters <= 0;
+    const refreshedQuotaReached = refreshedRemainingCharacters <= 0;
 
     if (refreshedQuotaReached || quotaReached) {
-      setAlert({ type: 'error', text: 'Your translation quota has been reached. Please purchase additional request packs.' });
+      setAlert({ type: 'error', text: 'Your translation quota has been reached. Please purchase additional character capacity.' });
       onStatus('Upload blocked: quota reached', 'error');
       return;
     }
 
-    if (
-      (refreshedLimit > 0 && refreshedRemainingRequests / refreshedLimit < 0.1) ||
-      (refreshedCharLimit > 0 && refreshedRemainingCharacters / refreshedCharLimit < 0.1)
-    ) {
-      setAlert({ type: 'warn', text: 'Your license is nearing its limits. Renew soon to avoid interruptions.' });
-      onStatus('License nearing limits', 'warn');
+    if (refreshedCharLimit > 0 && refreshedRemainingCharacters / refreshedCharLimit < 0.1) {
+      setAlert({ type: 'warn', text: 'Your license is nearing its character limit. Renew soon to avoid interruptions.' });
+      onStatus('License nearing character limit', 'warn');
     }
 
     const pending = files.filter((e) => e.status === 'pending');
@@ -165,7 +157,7 @@ export default function UploadView({ onStatus, licenseSession, onLicenseSessionU
 
       <div className="card">
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Remaining Requests: <strong>{remainingRequests}</strong> | Remaining Characters: <strong>{remainingCharacters}</strong>
+          Remaining Characters: <strong>{remainingCharacters.toLocaleString()}</strong>
         </p>
         {quotaReached && (
           <div className="alert alert--error" style={{ marginBottom: 12 }}>

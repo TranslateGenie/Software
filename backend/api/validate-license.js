@@ -60,10 +60,11 @@ function getInvalidReason(record) {
   if (!record) return 'not-found';
   if (!record.valid) return 'inactive';
 
+  // Licenses are metered by characters only — documents are unlimited, so the request/document
+  // count is no longer a lockout reason.
   const normalized = normalizeLicenseRecord(record);
-  const requestExceeded = normalized.requests >= normalized.limit;
   const characterExceeded = normalized.characters >= normalized.charLimit;
-  if (requestExceeded || characterExceeded) return 'limit-reached';
+  if (characterExceeded) return 'limit-reached';
 
   return null;
 }

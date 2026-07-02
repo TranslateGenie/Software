@@ -4,17 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pricing — Translate Genie</title>
-  <meta name="description" content="Simple one-time Translate Genie license pricing — no subscription. Choose a pack of translation requests and character capacity that fits your needs." />
+  <meta name="description" content="Simple one-time Translate Genie license pricing — no subscription. Choose a pack of character capacity that fits your needs, with unlimited documents." />
   <link rel="canonical" href="https://translategenie.github.io/Software/pricing.html" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Translate Genie" />
   <meta property="og:title" content="Pricing — Translate Genie" />
-  <meta property="og:description" content="One-time license pricing with no subscription. Pick a pack of translation requests and character capacity that fits your needs." />
+  <meta property="og:description" content="One-time license pricing with no subscription. Pick a pack of character capacity that fits your needs, with unlimited documents." />
   <meta property="og:url" content="https://translategenie.github.io/Software/pricing.html" />
   <meta property="og:image" content="https://translategenie.github.io/Software/Logo2.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Pricing — Translate Genie" />
-  <meta name="twitter:description" content="One-time license pricing with no subscription. Pick a pack of translation requests and character capacity that fits your needs." />
+  <meta name="twitter:description" content="One-time license pricing with no subscription. Pick a pack of character capacity that fits your needs, with unlimited documents." />
   <meta name="twitter:image" content="https://translategenie.github.io/Software/Logo2.png" />
   <link rel="icon" type="image/png" href="Mascot.png" />
   <link rel="stylesheet" href="styles.css" />
@@ -245,7 +245,7 @@
 
       <div class="pricing-header">
         <h1>License Options</h1>
-        <p>Each pack includes translation requests and character capacity. Access ends when either limit is reached. Taxes not included.</p>
+        <p>Each pack includes character capacity with unlimited documents. Access ends when the character capacity is used up. Taxes not included.</p>
       </div>
 
       <div id="renewBanner" style="display:none;background:rgba(13,76,148,0.12);border:1px solid var(--brand);border-radius:12px;padding:0.85rem 1.1rem;margin-bottom:1.25rem;font-size:0.88rem;color:var(--ink);text-align:center;">
@@ -259,7 +259,7 @@
           <div class="license-card" data-name="One Wish" data-price="$10" data-price-num="10" data-requests="10" data-characters="200,000" data-pack="one-wish">
             <div class="license-card-left">
               <span class="license-card-name">One Wish</span>
-              <span class="license-card-limits">10 requests &nbsp;·&nbsp; 200,000 characters</span>
+              <span class="license-card-limits">200,000 characters &nbsp;·&nbsp; unlimited documents</span>
             </div>
             <span class="license-card-price">$10</span>
           </div>
@@ -267,7 +267,7 @@
           <div class="license-card" data-name="Two Wishes" data-price="$99" data-price-num="99" data-requests="100" data-characters="2,000,000" data-pack="starter">
             <div class="license-card-left">
               <span class="license-card-name">Two Wishes</span>
-              <span class="license-card-limits">100 requests &nbsp;·&nbsp; 2,000,000 characters</span>
+              <span class="license-card-limits">2,000,000 characters &nbsp;·&nbsp; unlimited documents</span>
             </div>
             <span class="license-card-price">$99</span>
           </div>
@@ -275,7 +275,7 @@
           <div class="license-card" data-name="Three Wishes" data-price="$350" data-price-num="350" data-requests="500" data-characters="10,000,000" data-pack="small">
             <div class="license-card-left">
               <span class="license-card-name">Three Wishes</span>
-              <span class="license-card-limits">500 requests &nbsp;·&nbsp; 10,000,000 characters</span>
+              <span class="license-card-limits">10,000,000 characters &nbsp;·&nbsp; unlimited documents</span>
             </div>
             <span class="license-card-price">$350</span>
           </div>
@@ -283,7 +283,7 @@
           <div class="license-card" data-name="Genie Sidekick" data-price="$1,250" data-price-num="1250" data-requests="2,000" data-characters="40,000,000" data-pack="medium">
             <div class="license-card-left">
               <span class="license-card-name">Genie Sidekick</span>
-              <span class="license-card-limits">2,000 requests &nbsp;·&nbsp; 40,000,000 characters</span>
+              <span class="license-card-limits">40,000,000 characters &nbsp;·&nbsp; unlimited documents</span>
             </div>
             <span class="license-card-price">$1,250</span>
           </div>
@@ -291,7 +291,7 @@
           <div class="license-card" data-name="Genie Companion" data-price="$5,000" data-price-num="5000" data-requests="10,000" data-characters="200,000,000" data-pack="enterprise">
             <div class="license-card-left">
               <span class="license-card-name">Genie Companion</span>
-              <span class="license-card-limits">10,000 requests &nbsp;·&nbsp; 200,000,000 characters</span>
+              <span class="license-card-limits">200,000,000 characters &nbsp;·&nbsp; unlimited documents</span>
             </div>
             <span class="license-card-price">$5,000</span>
           </div>
@@ -380,7 +380,7 @@
 
         modalPlanName.textContent = selectedPlan.name;
         modalPlanPrice.textContent = selectedPlan.price;
-        modalPlanLimits.textContent = selectedPlan.requests + ' requests · ' + selectedPlan.characters + ' characters';
+        modalPlanLimits.textContent = selectedPlan.characters + ' characters · unlimited documents';
 
         orgNameInput.value = '';
         orgNameError.textContent = '';

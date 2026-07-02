@@ -1,24 +1,13 @@
 import React, { useMemo, useState } from 'react';
 
-function formatDate(ts) {
-  if (!ts) return 'Not set';
-  const date = new Date(Number(ts));
-  if (Number.isNaN(date.getTime())) return 'Not set';
-  return date.toLocaleString();
-}
-
 export default function LicenseManagementView({ onStatus, licenseSession, onLicenseSessionUpdated }) {
   const [loading, setLoading] = useState(false);
 
   const metrics = useMemo(() => {
-    const limit = Number(licenseSession?.limit || 0);
-    const requests = Number(licenseSession?.requests || 0);
     const charLimit = Number(licenseSession?.charLimit || 0);
     const characters = Number(licenseSession?.characters || 0);
     return {
-      remainingRequests: Math.max(0, limit - requests),
       remainingCharacters: Math.max(0, charLimit - characters),
-      requestText: `${requests} / ${limit}`,
       characterText: `${characters} / ${charLimit}`,
     };
   }, [licenseSession]);
@@ -66,18 +55,9 @@ export default function LicenseManagementView({ onStatus, licenseSession, onLice
             <span className="metric-value">{licenseSession?.type || 'Unknown'}</span>
           </div>
           <div className="metric-card">
-            <span className="metric-label">Remaining Requests</span>
-            <span className="metric-value">{metrics.remainingRequests}</span>
-            <span className="metric-sub">Used: {metrics.requestText}</span>
-          </div>
-          <div className="metric-card">
             <span className="metric-label">Remaining Characters</span>
             <span className="metric-value">{metrics.remainingCharacters.toLocaleString()}</span>
             <span className="metric-sub">Used: {metrics.characterText}</span>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Expiration Date</span>
-            <span className="metric-value metric-value--sm">{formatDate(licenseSession?.expiresAt)}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>

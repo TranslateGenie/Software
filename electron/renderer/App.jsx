@@ -22,21 +22,11 @@ function buildLicenseAlerts(session) {
   }
 
   const alerts = [];
-  const expiresAt = Number(session.expiresAt || 0);
-  if (expiresAt > 0 && expiresAt <= Date.now()) {
-    alerts.push({ level: 'error', text: 'Your license has expired. Renew to continue uninterrupted uploads.' });
-  }
 
-  const limit = Number(session.limit || 0);
-  const requests = Number(session.requests || 0);
+  // Licenses are metered by characters only — no document/request limit and no time expiration.
   const charLimit = Number(session.charLimit || 0);
   const characters = Number(session.characters || 0);
-  const remainingRequests = Math.max(0, limit - requests);
   const remainingCharacters = Math.max(0, charLimit - characters);
-
-  if (limit > 0 && remainingRequests > 0 && remainingRequests / limit < 0.1) {
-    alerts.push({ level: 'warn', text: 'Your license is nearing its request limit. Renew soon to avoid interruptions.' });
-  }
 
   if (charLimit > 0 && remainingCharacters > 0 && remainingCharacters / charLimit < 0.1) {
     alerts.push({ level: 'warn', text: 'Your license is nearing its character limit. Renew soon to avoid interruptions.' });

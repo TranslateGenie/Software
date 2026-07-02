@@ -20,7 +20,7 @@ export default function LicenseView({ onValidated, onStatus }) {
       const result = await window.mdas.validateLicenseKey(licenseKey.trim());
       if (!result?.valid) {
         if (result?.reason === 'limit-reached') {
-          setError('Your translation quota has been reached. Please purchase additional request packs.');
+          setError('Your translation quota has been reached. Please purchase additional character capacity.');
         } else {
           setError('License key is invalid or inactive.');
         }
